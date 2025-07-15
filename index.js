@@ -87,7 +87,14 @@ const downloadAndEncodeImage = async (imageUrl) => {
     return base64;
   } catch (error) {
     console.error('Error downloading image:', error);
-    throw new Error('Failed to download and encode image');
+    
+    if (error.message.includes('fetch')) {
+      throw new Error(`Failed to download image from URL: ${error.message}`);
+    } else if (error.message.includes('arrayBuffer')) {
+      throw new Error('Failed to convert image to buffer');
+    } else {
+      throw new Error(`Image processing error: ${error.message}`);
+    }
   }
 };
 
@@ -144,18 +151,41 @@ const processImageWithOpenAI = async (base64Image) => {
     });
 
     const content = response.choices[0].message.content;
+    console.log('OpenAI response content:', content);
     
     // Try to extract JSON from the response
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (parseError) {
+        console.error('JSON parse error for extracted array:', parseError);
+        throw new Error('Invalid JSON format in OpenAI response');
+      }
     }
     
     // If no JSON array found, try to parse the entire response
-    return JSON.parse(content);
+    try {
+      return JSON.parse(content);
+    } catch (parseError) {
+      console.error('JSON parse error for full content:', parseError);
+      console.error('Raw content:', content);
+      throw new Error('OpenAI response is not valid JSON');
+    }
   } catch (error) {
     console.error('OpenAI API error:', error);
-    throw new Error('Failed to process image with OpenAI');
+    
+    // Log more specific error details
+    if (error.response) {
+      console.error('OpenAI API response error:', error.response.data);
+      throw new Error(`OpenAI API error: ${error.response.data.error?.message || error.response.statusText}`);
+    } else if (error.request) {
+      console.error('OpenAI API request error:', error.request);
+      throw new Error('OpenAI API request failed - no response received');
+    } else {
+      console.error('OpenAI API setup error:', error.message);
+      throw new Error(`OpenAI API error: ${error.message}`);
+    }
   }
 };
 
@@ -232,9 +262,41 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       'POST /process': 'Process image and detect household items',
-      'GET /health': 'Health check'
+      'GET /health': 'Health check',
+      'GET /test-openai': 'Test OpenAI API connection'
     }
   });
+});
+
+/**
+ * GET /test-openai - Test OpenAI API connection
+ */
+app.get('/test-openai', async (req, res) => {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "user",
+          content: "Say 'Hello from Track My Home API'"
+        }
+      ],
+      max_tokens: 10
+    });
+    
+    res.json({
+      success: true,
+      message: response.choices[0].message.content,
+      model: response.model
+    });
+  } catch (error) {
+    console.error('OpenAI test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.response?.data || 'No additional details'
+    });
+  }
 });
 
 // Error handling middleware
