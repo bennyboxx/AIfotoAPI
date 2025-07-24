@@ -110,43 +110,39 @@ const processImageWithOpenAI = async (base64Image) => {
       messages: [
         {
           role: "system",
-          content: `You are an expert at analyzing household items in photos. 
-          Analyze the image and return a JSON array of all visible objects with the following structure:
-          [
-            {
-              "name": "Item name",
-              "description": "Brief description of the item",
-              "estimated_value": 25.50,
-              "quantity": 1,
-              "accuracy": 0.95,
-              "bounding_box": {
-                "x": 120,
-                "y": 200,
-                "width": 300,
-                "height": 180
-              }
-            }
-          ]
-          
-          Guidelines:
-          - estimated_value should be in euros (€)
-          - quantity should be the number of that specific item visible
-          - Be realistic with value estimates
-          - Include all significant items you can identify
-          - accuracy should be a number between 0 and 1, 1 being the highest accuracy
-          - bounding_box must be the coordinates of the item in the image, in pixel values relative to the original image size.
-          - bounding_box.x and bounding_box.y are the pixel coordinates of the top-left corner of the item.
-          - bounding_box.width and bounding_box.height are the width and height of the item in pixels.
-          - Only provide bounding boxes if you are confident about the location; otherwise, set all values to null.
-          - Example bounding_box: { "x": 100, "y": 150, "width": 200, "height": 100 }
-          - Return ONLY valid JSON, no additional text`
+          content: `
+    You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:
+    
+    [
+      {
+        "name": "Item name",
+        "description": "Brief description of the item",
+        "estimated_value": 25.50,
+        "quantity": 1,
+        "accuracy": 0.95,
+        "bounding_box": {
+          "x": 120,
+          "y": 200,
+          "width": 300,
+          "height": 180
+        }
+      }
+    ]
+    
+    Rules:
+    - All prices in euros (€), as numbers (no currency symbol).
+    - Accuracy: confidence score (0.0 to 1.0).
+    - bounding_box.x/y are top-left pixel coordinates relative to the image.
+    - Only provide bounding_box values if you're confident. Else, set all to null.
+    - Do not return anything but the JSON array.
+          `
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: "Analyze this image and identify all household items. Return the result as a JSON array."
+              text: "Analyze this image and return the items found."
             },
             {
               type: "image_url",
