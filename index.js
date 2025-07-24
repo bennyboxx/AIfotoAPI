@@ -134,7 +134,11 @@ const processImageWithOpenAI = async (base64Image) => {
           - Be realistic with value estimates
           - Include all significant items you can identify
           - accuracy should be a number between 0 and 1, 1 being the highest accuracy
-          - bounding_box should be the coordinates of the item in the image
+          - bounding_box must be the coordinates of the item in the image, in pixel values relative to the original image size.
+          - bounding_box.x and bounding_box.y are the pixel coordinates of the top-left corner of the item.
+          - bounding_box.width and bounding_box.height are the width and height of the item in pixels.
+          - Only provide bounding boxes if you are confident about the location; otherwise, set all values to null.
+          - Example bounding_box: { "x": 100, "y": 150, "width": 200, "height": 100 }
           - Return ONLY valid JSON, no additional text`
         },
         {
