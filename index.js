@@ -118,7 +118,13 @@ const processImageWithOpenAI = async (base64Image) => {
               "description": "Brief description of the item",
               "estimated_value": 25.50,
               "quantity": 1,
-              "accuracy": 0.95
+              "accuracy": 0.95,
+              "bounding_box": {
+                "x": 120,
+                "y": 200,
+                "width": 300,
+                "height": 180
+              }
             }
           ]
           
@@ -128,6 +134,7 @@ const processImageWithOpenAI = async (base64Image) => {
           - Be realistic with value estimates
           - Include all significant items you can identify
           - accuracy should be a number between 0 and 1, 1 being the highest accuracy
+          - bounding_box should be the coordinates of the item in the image
           - Return ONLY valid JSON, no additional text`
         },
         {
