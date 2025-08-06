@@ -167,15 +167,17 @@ const processImageWithOpenAI = async (base64Image) => {
        }
      ]
      
-     Rules:
-     - All prices in euros (€), as numbers (no currency symbol).
-     - Accuracy: confidence score (0.0 to 1.0).
-     - bounding_box coordinates must be based on the actual image dimensions in pixels.
-     - bounding_box.x and bounding_box.y are the top-left pixel coordinates (0,0 is top-left corner).
-     - bounding_box.width and bounding_box.height are the width and height in pixels.
-     - Coordinates should be relative to the image's actual pixel dimensions.
-     - Only provide bounding_box values if you're confident about the location. Else, set all to null.
-     - Do not return anything but the JSON array.
+           Rules:
+      - All prices in euros (€), as numbers (no currency symbol).
+      - Accuracy: confidence score (0.0 to 1.0).
+      - bounding_box coordinates must be based on the actual image dimensions in pixels.
+      - bounding_box.x and bounding_box.y are the top-left pixel coordinates (0,0 is top-left corner).
+      - bounding_box.width and bounding_box.height are the width and height in pixels.
+      - Coordinates should be relative to the image's actual pixel dimensions.
+      - IMPORTANT: Be extremely precise with bounding box coordinates. Measure carefully.
+      - The bounding box should tightly fit around the object, not be too large or small.
+      - If you cannot determine precise coordinates, set all bounding_box values to null.
+      - Do not return anything but the JSON array.
            `
         },
         {
@@ -205,7 +207,30 @@ const processImageWithOpenAI = async (base64Image) => {
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       try {
-        return JSON.parse(jsonMatch[0]);
+        const items = JSON.parse(jsonMatch[0]);
+        
+        // Validate and fix bounding box coordinates
+        items.forEach(item => {
+          if (item.bounding_box && item.bounding_box.x !== null) {
+            // Check if coordinates are within image bounds
+            if (item.bounding_box.x < 0 || item.bounding_box.y < 0 ||
+                item.bounding_box.x + item.bounding_box.width > imageWidth ||
+                item.bounding_box.y + item.bounding_box.height > imageHeight) {
+              console.warn('Invalid bounding box coordinates detected, setting to null:', item.bounding_box);
+              item.bounding_box = { x: null, y: null, width: null, height: null };
+            }
+            
+            // Check if bounding box is unreasonably large (more than 80% of image)
+            const boxArea = item.bounding_box.width * item.bounding_box.height;
+            const imageArea = imageWidth * imageHeight;
+            if (boxArea > imageArea * 0.8) {
+              console.warn('Bounding box too large, setting to null:', item.bounding_box);
+              item.bounding_box = { x: null, y: null, width: null, height: null };
+            }
+          }
+        });
+        
+        return items;
       } catch (parseError) {
         console.error('JSON parse error for extracted array:', parseError);
         throw new Error('Invalid JSON format in OpenAI response');
