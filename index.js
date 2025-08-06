@@ -99,11 +99,49 @@ const downloadAndEncodeImage = async (imageUrl) => {
 };
 
 /**
+ * Get image dimensions from base64 image
+ * @param {string} base64Image - Base64 encoded image
+ * @returns {Object} Image dimensions {width, height}
+ */
+const getImageDimensions = (base64Image) => {
+  try {
+    // Create a buffer from base64
+    const buffer = Buffer.from(base64Image, 'base64');
+    
+    // Simple check for common image formats to get dimensions
+    // This is a basic implementation - for production, consider using a proper image library
+    let width = 1920; // Default fallback
+    let height = 1080; // Default fallback
+    
+    // For JPEG, we can try to extract dimensions from the header
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8) { // JPEG signature
+      let i = 2;
+      while (i < buffer.length - 1) {
+        if (buffer[i] === 0xFF && buffer[i + 1] === 0xC0) { // SOF0 marker
+          height = (buffer[i + 5] << 8) | buffer[i + 6];
+          width = (buffer[i + 7] << 8) | buffer[i + 8];
+          break;
+        }
+        i++;
+      }
+    }
+    
+    return { width, height };
+  } catch (error) {
+    console.warn('Could not determine image dimensions, using defaults:', error.message);
+    return { width: 1920, height: 1080 }; // Default fallback
+  }
+};
+
+/**
  * Process image with OpenAI Vision API
  * @param {string} base64Image - Base64 encoded image
  * @returns {Object} OpenAI response with detected items
  */
 const processImageWithOpenAI = async (base64Image) => {
+  // Get image dimensions
+  const { width: imageWidth, height: imageHeight } = getImageDimensions(base64Image);
+  
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -111,38 +149,41 @@ const processImageWithOpenAI = async (base64Image) => {
         {
           role: "system",
           content: `
-    You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:
-    
-    [
-      {
-        "name": "Item name",
-        "description": "Brief description of the item",
-        "estimated_value": 25.50,
-        "quantity": 1,
-        "accuracy": 0.95,
-        "bounding_box": {
-          "x": 120,
-          "y": 200,
-          "width": 300,
-          "height": 180
-        }
-      }
-    ]
-    
-    Rules:
-    - All prices in euros (€), as numbers (no currency symbol).
-    - Accuracy: confidence score (0.0 to 1.0).
-    - bounding_box.x/y are top-left pixel coordinates relative to the image.
-    - Only provide bounding_box values if you're confident. Else, set all to null.
-    - Do not return anything but the JSON array.
-          `
+     You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:
+     
+     [
+       {
+         "name": "Item name",
+         "description": "Brief description of the item",
+         "estimated_value": 25.50,
+         "quantity": 1,
+         "accuracy": 0.95,
+         "bounding_box": {
+           "x": 120,
+           "y": 200,
+           "width": 300,
+           "height": 180
+         }
+       }
+     ]
+     
+     Rules:
+     - All prices in euros (€), as numbers (no currency symbol).
+     - Accuracy: confidence score (0.0 to 1.0).
+     - bounding_box coordinates must be based on the actual image dimensions in pixels.
+     - bounding_box.x and bounding_box.y are the top-left pixel coordinates (0,0 is top-left corner).
+     - bounding_box.width and bounding_box.height are the width and height in pixels.
+     - Coordinates should be relative to the image's actual pixel dimensions.
+     - Only provide bounding_box values if you're confident about the location. Else, set all to null.
+     - Do not return anything but the JSON array.
+           `
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: "Analyze this image and return the items found."
+              text: `Analyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items found.`
             },
             {
               type: "image_url",
