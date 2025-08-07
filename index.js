@@ -9,6 +9,7 @@ require('dotenv').config();
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
+const API_VERSION = '1.0.1';
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -235,7 +236,7 @@ const processImageWithOpenAI = async (base64Image) => {
   
   try {
          const response = await openai.chat.completions.create({
-       model: "gpt-4o",
+       model: "gpt-4.1",
        messages: [
          {
            role: "system",
@@ -395,13 +396,13 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     const processingTime = (Date.now() - startTime) / 1000;
     
     res.json({
+      version: API_VERSION,
       items: result.items,
       token_usage: result.token_usage,
       warnings: result.warnings || [],
       processing_time: processingTime,
       user_id: user_id,
-      image_deleted: deleteSuccess,
-      version: "1.0.0"
+      image_deleted: deleteSuccess
     });
 
   } catch (error) {
@@ -409,6 +410,7 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     const processingTime = (Date.now() - startTime) / 1000;
     
     res.status(500).json({
+      version: API_VERSION,
       error: 'Failed to process image',
       processing_time: processingTime,
       details: error.message
@@ -421,6 +423,7 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
  */
 app.get('/health', (req, res) => {
   res.json({ 
+    version: API_VERSION,
     status: 'OK', 
     timestamp: new Date().toISOString(),
     service: 'Track My Home API'
@@ -433,7 +436,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     message: 'Track My Home API',
-    version: '1.0.0',
+    version: API_VERSION,
     endpoints: {
       'POST /process': 'Process image and detect household items',
       'GET /health': 'Health check',
@@ -459,6 +462,7 @@ app.get('/test-openai', async (req, res) => {
     });
     
     res.json({
+      version: API_VERSION,
       success: true,
       message: response.choices[0].message.content,
       model: response.model
@@ -466,6 +470,7 @@ app.get('/test-openai', async (req, res) => {
   } catch (error) {
     console.error('OpenAI test error:', error);
     res.status(500).json({
+      version: API_VERSION,
       success: false,
       error: error.message,
       details: error.response?.data || 'No additional details'
@@ -477,6 +482,7 @@ app.get('/test-openai', async (req, res) => {
 app.use((error, req, res, next) => {
   console.error('Unhandled error:', error);
   res.status(500).json({
+    version: API_VERSION,
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
   });
@@ -484,7 +490,10 @@ app.use((error, req, res, next) => {
 
 // 404 handler
 app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
+  res.status(404).json({ 
+    version: API_VERSION,
+    error: 'Endpoint not found' 
+  });
 });
 
 // Start server
