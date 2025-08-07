@@ -177,7 +177,7 @@ const getImageDimensions = (base64Image) => {
 /**
  * Process image with OpenAI Vision API
  * @param {string} base64Image - Base64 encoded image
- * @returns {Object} OpenAI response with detected items
+ * @returns {Object} OpenAI response with detected items and token usage
  */
 const processImageWithOpenAI = async (base64Image) => {
   // Get image dimensions
@@ -231,15 +231,23 @@ const processImageWithOpenAI = async (base64Image) => {
     const content = response.choices[0].message.content;
     console.log('OpenAI response content:', content);
     
+    // Extract token usage information
+    const tokenUsage = response.usage || {};
+    
     // Try to extract JSON from the response
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       try {
         const items = JSON.parse(jsonMatch[0]);
         
-
-        
-        return items;
+        return {
+          items: items,
+          token_usage: {
+            prompt_tokens: tokenUsage.prompt_tokens || 0,
+            completion_tokens: tokenUsage.completion_tokens || 0,
+            total_tokens: tokenUsage.total_tokens || 0
+          }
+        };
       } catch (parseError) {
         console.error('JSON parse error for extracted array:', parseError);
         throw new Error('Invalid JSON format in OpenAI response');
@@ -248,7 +256,15 @@ const processImageWithOpenAI = async (base64Image) => {
     
     // If no JSON array found, try to parse the entire response
     try {
-      return JSON.parse(content);
+      const items = JSON.parse(content);
+      return {
+        items: items,
+        token_usage: {
+          prompt_tokens: tokenUsage.prompt_tokens || 0,
+          completion_tokens: tokenUsage.completion_tokens || 0,
+          total_tokens: tokenUsage.total_tokens || 0
+        }
+      };
     } catch (parseError) {
       console.error('JSON parse error for full content:', parseError);
       console.error('Raw content:', content);
@@ -302,7 +318,7 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
     
     // Process with OpenAI Vision
-    const items = await processImageWithOpenAI(base64Image);
+    const result = await processImageWithOpenAI(base64Image);
     
     // Delete image from Firebase Storage after processing
     const deleteSuccess = await deleteImageFromFirebase(filePath);
@@ -310,7 +326,8 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     const processingTime = (Date.now() - startTime) / 1000;
     
     res.json({
-      items: items,
+      items: result.items,
+      token_usage: result.token_usage,
       processing_time: processingTime,
       user_id: user_id,
       image_deleted: deleteSuccess
