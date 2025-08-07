@@ -235,7 +235,7 @@ const processImageWithOpenAI = async (base64Image) => {
   
   try {
          const response = await openai.chat.completions.create({
-       model: "gpt-4o-turbo",
+       model: "gpt-4o",
        messages: [
          {
            role: "system",
