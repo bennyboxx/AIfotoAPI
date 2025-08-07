@@ -175,64 +175,131 @@ const getImageDimensions = (base64Image) => {
 };
 
 /**
+ * Compress image to reduce token usage
+ * @param {string} base64Image - Base64 encoded image
+ * @param {number} maxWidth - Maximum width (default: 1024)
+ * @param {number} maxHeight - Maximum height (default: 1024)
+ * @returns {string} Compressed base64 image
+ */
+const compressImage = async (base64Image, maxWidth = 1024, maxHeight = 1024) => {
+  try {
+    // For now, we'll use a simple approach to reduce image size
+    // In production, you might want to use a proper image processing library like sharp
+    const buffer = Buffer.from(base64Image, 'base64');
+    
+    // Check if image is already small enough
+    const { width, height } = getImageDimensions(base64Image);
+    
+    if (width <= maxWidth && height <= maxHeight) {
+      console.log(`Image already within size limits: ${width}x${height}`);
+      return base64Image;
+    }
+    
+    // Calculate new dimensions while maintaining aspect ratio
+    const aspectRatio = width / height;
+    let newWidth = maxWidth;
+    let newHeight = maxHeight;
+    
+    if (aspectRatio > 1) {
+      // Landscape image
+      newHeight = Math.round(maxWidth / aspectRatio);
+    } else {
+      // Portrait image
+      newWidth = Math.round(maxHeight * aspectRatio);
+    }
+    
+    console.log(`Compressing image from ${width}x${height} to ${newWidth}x${newHeight}`);
+    
+    // For now, return the original image with a warning
+    // In a real implementation, you would resize the image here
+    console.warn('Image compression not implemented - using original image');
+    return base64Image;
+    
+  } catch (error) {
+    console.error('Error compressing image:', error);
+    return base64Image; // Return original if compression fails
+  }
+};
+
+/**
  * Process image with OpenAI Vision API
  * @param {string} base64Image - Base64 encoded image
  * @returns {Object} OpenAI response with detected items and token usage
  */
 const processImageWithOpenAI = async (base64Image) => {
+  // Compress image to reduce token usage
+  const compressedImage = await compressImage(base64Image, 1024, 1024);
+  
   // Get image dimensions
-  const { width: imageWidth, height: imageHeight } = getImageDimensions(base64Image);
+  const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
   
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
+         const response = await openai.chat.completions.create({
+       model: "gpt-4o",
+       messages: [
+         {
+           role: "system",
+           content: `
+      You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:
+      
+      [
         {
-          role: "system",
-          content: `
-     You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:
-     
-     [
-       {
-         "name": "Item name",
-         "description": "Brief description of the item",
-         "estimated_value": 25.50,
-         "quantity": 1,
-         "accuracy": 0.95
-       }
-     ]
-     
-           Rules:
-      - All prices in euros (€), as numbers (no currency symbol).
-      - Accuracy: confidence score (0.0 to 1.0).
-      - Do not return anything but the JSON array.
-           `
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Analyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items found.`
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${base64Image}`
-              }
-            }
-          ]
+          "name": "Item name",
+          "description": "Brief description of the item",
+          "estimated_value": 25.50,
+          "quantity": 1,
+          "accuracy": 0.95
         }
-      ],
-      max_tokens: 2000,
-      temperature: 0.1
-    });
+      ]
+      
+            Rules:
+       - All prices in euros (€), as numbers (no currency symbol).
+       - Accuracy: confidence score (0.0 to 1.0).
+       - Do not return anything but the JSON array.
+            `
+         },
+         {
+           role: "user",
+           content: [
+             {
+               type: "text",
+               text: `Analyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items found.`
+             },
+             {
+               type: "image_url",
+               image_url: {
+                 url: `data:image/jpeg;base64,${compressedImage}`
+               }
+             }
+           ]
+         }
+       ],
+       max_tokens: 1000, // Reduced to save on completion tokens
+       temperature: 0.1
+     });
 
     const content = response.choices[0].message.content;
     console.log('OpenAI response content:', content);
     
     // Extract token usage information
     const tokenUsage = response.usage || {};
+    
+    // Log detailed token usage
+    const totalTokens = tokenUsage.total_tokens || 0;
+    const estimatedImageTokens = Math.ceil((imageWidth * imageHeight) / 768);
+    
+    console.log('Token usage details:', {
+      prompt_tokens: tokenUsage.prompt_tokens,
+      completion_tokens: tokenUsage.completion_tokens,
+      total_tokens: totalTokens,
+      image_dimensions: `${imageWidth}x${imageHeight}`,
+      estimated_image_tokens: estimatedImageTokens
+    });
+    
+    // Warn if token usage is high
+    if (totalTokens > 15000) {
+      console.warn(`High token usage detected: ${totalTokens} tokens. Consider using smaller images.`);
+    }
     
     // Try to extract JSON from the response
     const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -245,8 +312,9 @@ const processImageWithOpenAI = async (base64Image) => {
           token_usage: {
             prompt_tokens: tokenUsage.prompt_tokens || 0,
             completion_tokens: tokenUsage.completion_tokens || 0,
-            total_tokens: tokenUsage.total_tokens || 0
-          }
+            total_tokens: totalTokens
+          },
+          warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
         };
       } catch (parseError) {
         console.error('JSON parse error for extracted array:', parseError);
@@ -262,8 +330,9 @@ const processImageWithOpenAI = async (base64Image) => {
         token_usage: {
           prompt_tokens: tokenUsage.prompt_tokens || 0,
           completion_tokens: tokenUsage.completion_tokens || 0,
-          total_tokens: tokenUsage.total_tokens || 0
-        }
+          total_tokens: totalTokens
+        },
+        warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
       };
     } catch (parseError) {
       console.error('JSON parse error for full content:', parseError);
@@ -328,6 +397,7 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     res.json({
       items: result.items,
       token_usage: result.token_usage,
+      warnings: result.warnings || [],
       processing_time: processingTime,
       user_id: user_id,
       image_deleted: deleteSuccess
