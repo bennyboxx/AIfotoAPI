@@ -71,9 +71,48 @@ const verifyFirebaseToken = async (req, res, next) => {
 };
 
 /**
+ * Extract file path from Firebase Storage URL
+ * @param {string} imageUrl - Firebase Storage URL
+ * @returns {string} File path in Firebase Storage
+ */
+const extractFilePathFromUrl = (imageUrl) => {
+  try {
+    // Firebase Storage URL format: https://firebasestorage.googleapis.com/v0/b/PROJECT_ID/o/PATH%2FTO%2FFILE?alt=media&token=...
+    const url = new URL(imageUrl);
+    const pathMatch = url.pathname.match(/\/o\/(.+)/);
+    if (pathMatch) {
+      // Decode the URL-encoded path
+      return decodeURIComponent(pathMatch[1]);
+    }
+    throw new Error('Could not extract file path from URL');
+  } catch (error) {
+    console.error('Error extracting file path:', error);
+    throw new Error('Invalid Firebase Storage URL format');
+  }
+};
+
+/**
+ * Delete image from Firebase Storage
+ * @param {string} filePath - File path in Firebase Storage
+ * @returns {boolean} Success status
+ */
+const deleteImageFromFirebase = async (filePath) => {
+  try {
+    const bucket = admin.storage().bucket();
+    await bucket.file(filePath).delete();
+    console.log(`Successfully deleted image: ${filePath}`);
+    return true;
+  } catch (error) {
+    console.error('Error deleting image from Firebase Storage:', error);
+    // Don't throw error here, just log it - we don't want to fail the whole request
+    return false;
+  }
+};
+
+/**
  * Download image from URL and convert to base64
  * @param {string} imageUrl - URL of the image to download
- * @returns {string} Base64 encoded image
+ * @returns {Object} { base64: string, filePath: string }
  */
 const downloadAndEncodeImage = async (imageUrl) => {
   try {
@@ -84,7 +123,9 @@ const downloadAndEncodeImage = async (imageUrl) => {
     
     const buffer = await response.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
-    return base64;
+    const filePath = extractFilePathFromUrl(imageUrl);
+    
+    return { base64, filePath };
   } catch (error) {
     console.error('Error downloading image:', error);
     
@@ -144,7 +185,7 @@ const processImageWithOpenAI = async (base64Image) => {
   
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
@@ -258,17 +299,21 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     console.log(`Processing image for user ${user_id}`);
 
     // Download and encode image
-    const base64Image = await downloadAndEncodeImage(image_url);
+    const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
     
     // Process with OpenAI Vision
     const items = await processImageWithOpenAI(base64Image);
+    
+    // Delete image from Firebase Storage after processing
+    const deleteSuccess = await deleteImageFromFirebase(filePath);
     
     const processingTime = (Date.now() - startTime) / 1000;
     
     res.json({
       items: items,
       processing_time: processingTime,
-      user_id: user_id
+      user_id: user_id,
+      image_deleted: deleteSuccess
     });
 
   } catch (error) {
