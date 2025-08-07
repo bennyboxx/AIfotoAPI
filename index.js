@@ -9,7 +9,7 @@ require('dotenv').config();
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_VERSION = '1.0.1';
+const API_VERSION = '1.0.2';
 
 // Initialize OpenAI
 const openai = new OpenAI({
