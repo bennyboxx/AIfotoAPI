@@ -224,7 +224,7 @@ const processImageWithOpenAI = async (base64Image) => {
           ]
         }
       ],
-      max_tokens: 2000,
+      max_tokens: 20000,
       temperature: 0.1
     });
 
