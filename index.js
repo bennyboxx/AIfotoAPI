@@ -185,7 +185,7 @@ const processImageWithOpenAI = async (base64Image) => {
   
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "GPT-4o",
       messages: [
         {
           role: "system",
@@ -224,7 +224,7 @@ const processImageWithOpenAI = async (base64Image) => {
           ]
         }
       ],
-      max_tokens: 20000,
+      max_tokens: 2000,
       temperature: 0.1
     });
 
