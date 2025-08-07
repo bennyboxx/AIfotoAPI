@@ -314,6 +314,7 @@ const processImageWithOpenAI = async (base64Image) => {
             completion_tokens: tokenUsage.completion_tokens || 0,
             total_tokens: totalTokens
           },
+          version: "1.0.0",
           warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
         };
       } catch (parseError) {
@@ -332,7 +333,6 @@ const processImageWithOpenAI = async (base64Image) => {
           completion_tokens: tokenUsage.completion_tokens || 0,
           total_tokens: totalTokens
         },
-        version: "1.0.0",
         warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
       };
     } catch (parseError) {
