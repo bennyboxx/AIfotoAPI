@@ -314,7 +314,6 @@ const processImageWithOpenAI = async (base64Image) => {
             completion_tokens: tokenUsage.completion_tokens || 0,
             total_tokens: totalTokens
           },
-          version: "1.0.0",
           warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
         };
       } catch (parseError) {
@@ -401,7 +400,8 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
       warnings: result.warnings || [],
       processing_time: processingTime,
       user_id: user_id,
-      image_deleted: deleteSuccess
+      image_deleted: deleteSuccess,
+      version: "1.0.0"
     });
 
   } catch (error) {
