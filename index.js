@@ -280,11 +280,56 @@ const processImageWithOpenAI = async (base64Image) => {
           ]
         }
       ],
-      max_output_tokens: 1000
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "items_response",
+          strict: true,
+          schema: {
+            type: "array",
+            items: {
+              type: "object",
+              required: [
+                "name",
+                "description",
+                "estimated_value",
+                "quantity",
+                "accuracy",
+                "bbox"
+              ],
+              properties: {
+                name: { type: "string" },
+                description: { type: "string" },
+                estimated_value: { type: "number" },
+                quantity: { type: "integer", minimum: 1 },
+                accuracy: { type: "number", minimum: 0, maximum: 1 },
+                bbox: {
+                  type: "object",
+                  required: ["x", "y", "width", "height"],
+                  properties: {
+                    x: { type: "integer", minimum: 0 },
+                    y: { type: "integer", minimum: 0 },
+                    width: { type: "integer", minimum: 1 },
+                    height: { type: "integer", minimum: 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      max_output_tokens: 10000
     });
 
     const content = response.output_text || "";
     console.log('OpenAI response content:', content);
+    
+    // Clean possible code fences to improve JSON parsing robustness
+    const contentClean = content
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
     
     // Extract token usage information (Responses API: input_tokens/output_tokens)
     const tokenUsage = response.usage || {};
@@ -309,7 +354,7 @@ const processImageWithOpenAI = async (base64Image) => {
     }
     
     // Try to extract JSON from the response
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    const jsonMatch = contentClean.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       try {
         const rawItems = JSON.parse(jsonMatch[0]);
@@ -336,7 +381,7 @@ const processImageWithOpenAI = async (base64Image) => {
     
     // If no JSON array found, try to parse the entire response
     try {
-      const rawItems = JSON.parse(content);
+      const rawItems = JSON.parse(contentClean);
       const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
       return {
         items: items,
@@ -351,7 +396,7 @@ const processImageWithOpenAI = async (base64Image) => {
       };
     } catch (parseError) {
       console.error('JSON parse error for full content:', parseError);
-      console.error('Raw content:', content);
+      console.error('Raw content:', contentClean);
       throw new Error('OpenAI response is not valid JSON');
     }
   } catch (error) {
