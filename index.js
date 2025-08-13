@@ -283,8 +283,8 @@ const processImageWithOpenAI = async (base64Image) => {
       text: {
         format: {
           type: "json_schema",
+          name: "items_response",
           json_schema: {
-            name: "items_response",
             strict: true,
             schema: {
               type: "array",
