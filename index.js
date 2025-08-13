@@ -235,63 +235,41 @@ const processImageWithOpenAI = async (base64Image) => {
   const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
   
   try {
-         const response = await openai.chat.completions.create({
-       model: "gpt-5",
-       messages: [
-         {
-           role: "system",
-           content: `
-      You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:
-      
-      [
+    const response = await openai.responses.create({
+      model: "gpt-5",
+      input: [
         {
-          "name": "Item name",
-          "description": "Brief description of the item",
-          "estimated_value": 25.50,
-          "quantity": 1,
-          "accuracy": 0.95
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:\n\n[\n  {\n    \"name\": \"Item name\",\n    \"description\": \"Brief description of the item\",\n    \"estimated_value\": 25.50,\n    \"quantity\": 1,\n    \"accuracy\": 0.95\n  }\n]\n\nRules:\n- All prices in euros (€), as numbers (no currency symbol).\n- Accuracy: confidence score (0.0 to 1.0).\n- Do not return anything but the JSON array.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items found.`
+            },
+            {
+              type: "input_image",
+              image_url: `data:image/jpeg;base64,${compressedImage}`
+            }
+          ]
         }
-      ]
-      
-            Rules:
-       - All prices in euros (€), as numbers (no currency symbol).
-       - Accuracy: confidence score (0.0 to 1.0).
-       - Do not return anything but the JSON array.
-            `
-         },
-         {
-           role: "user",
-           content: [
-             {
-               type: "text",
-               text: `Analyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items found.`
-             },
-             {
-               type: "image_url",
-               image_url: {
-                 url: `data:image/jpeg;base64,${compressedImage}`
-               }
-             }
-           ]
-         }
-       ],
-       max_completion_tokens: 10000, // Reduced to save on completion tokens
-       temperature: 0.1
-     });
+      ],
+      max_output_tokens: 1000
+    });
 
-    const content = response.choices[0].message.content;
+    const content = response.output_text || "";
     console.log('OpenAI response content:', content);
     
-    // Extract token usage information
+    // Extract token usage information (Responses API: input_tokens/output_tokens)
     const tokenUsage = response.usage || {};
+    const promptTokens = tokenUsage.input_tokens || tokenUsage.prompt_tokens || 0;
+    const completionTokens = tokenUsage.output_tokens || tokenUsage.completion_tokens || 0;
+    const totalTokens = tokenUsage.total_tokens || (promptTokens + completionTokens);
     
     // Log detailed token usage
-    const totalTokens = tokenUsage.total_tokens || 0;
     const estimatedImageTokens = Math.ceil((imageWidth * imageHeight) / 768);
     
     console.log('Token usage details:', {
-      prompt_tokens: tokenUsage.prompt_tokens,
-      completion_tokens: tokenUsage.completion_tokens,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
       total_tokens: totalTokens,
       image_dimensions: `${imageWidth}x${imageHeight}`,
       estimated_image_tokens: estimatedImageTokens
@@ -311,9 +289,13 @@ const processImageWithOpenAI = async (base64Image) => {
         return {
           items: items,
           token_usage: {
-            prompt_tokens: tokenUsage.prompt_tokens || 0,
-            completion_tokens: tokenUsage.completion_tokens || 0,
-            total_tokens: totalTokens
+            // Keep backward compatible fields
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: totalTokens,
+            // Also expose new fields
+            input_tokens: promptTokens,
+            output_tokens: completionTokens
           },
           warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
         };
@@ -329,9 +311,11 @@ const processImageWithOpenAI = async (base64Image) => {
       return {
         items: items,
         token_usage: {
-          prompt_tokens: tokenUsage.prompt_tokens || 0,
-          completion_tokens: tokenUsage.completion_tokens || 0,
-          total_tokens: totalTokens
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
+          input_tokens: promptTokens,
+          output_tokens: completionTokens
         },
         warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
       };
