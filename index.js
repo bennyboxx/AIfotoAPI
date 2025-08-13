@@ -271,7 +271,7 @@ const processImageWithOpenAI = async (base64Image) => {
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON array. For each clearly visible and identifiable household item, return:\n\n[\n  {\n    \"name\": \"Item name\",\n    \"description\": \"Brief description\",\n    \"estimated_value\": 25.50,\n    \"quantity\": 1,\n    \"accuracy\": 0.95,\n    \"bbox\": { \"x\": 100, \"y\": 200, \"width\": 300, \"height\": 150 }\n  }\n]\n\nStrict rules:\n- Output must be ONLY a JSON array (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- bbox is REQUIRED and must be pixel coordinates relative to the provided image (top-left origin (0,0)), integers only, kept fully inside the image.\n- If an item cannot be confidently localized, omit that item.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items.`
+              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON object with an \'items\' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"bbox\": { \"x\": 100, \"y\": 200, \"width\": 300, \"height\": 150 }\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key \'items\' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- bbox is REQUIRED and must be pixel coordinates relative to the provided image (top-left origin (0,0)), integers only, kept fully inside the image.\n- If an item cannot be confidently localized, omit that item.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
             },
             {
               type: "input_image",
@@ -285,35 +285,42 @@ const processImageWithOpenAI = async (base64Image) => {
           type: "json_schema",
           name: "items_response",
           schema: {
-            type: "array",
-            items: {
-              type: "object",
-              required: [
-                "name",
-                "description",
-                "estimated_value",
-                "quantity",
-                "accuracy",
-                "bbox"
-              ],
-              properties: {
-                name: { type: "string" },
-                description: { type: "string" },
-                estimated_value: { type: "number" },
-                quantity: { type: "integer", minimum: 1 },
-                accuracy: { type: "number", minimum: 0, maximum: 1 },
-                bbox: {
+            type: "object",
+            properties: {
+              items: {
+                type: "array",
+                items: {
                   type: "object",
-                  required: ["x", "y", "width", "height"],
+                  required: [
+                    "name",
+                    "description",
+                    "estimated_value",
+                    "quantity",
+                    "accuracy",
+                    "bbox"
+                  ],
                   properties: {
-                    x: { type: "integer", minimum: 0 },
-                    y: { type: "integer", minimum: 0 },
-                    width: { type: "integer", minimum: 1 },
-                    height: { type: "integer", minimum: 1 }
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    estimated_value: { type: "number" },
+                    quantity: { type: "integer", minimum: 1 },
+                    accuracy: { type: "number", minimum: 0, maximum: 1 },
+                    bbox: {
+                      type: "object",
+                      required: ["x", "y", "width", "height"],
+                      properties: {
+                        x: { type: "integer", minimum: 0 },
+                        y: { type: "integer", minimum: 0 },
+                        width: { type: "integer", minimum: 1 },
+                        height: { type: "integer", minimum: 1 }
+                      }
+                    }
                   }
                 }
               }
-            }
+            },
+            required: ["items"],
+            additionalProperties: false
           },
           strict: true
         }
@@ -386,10 +393,11 @@ const processImageWithOpenAI = async (base64Image) => {
     }
     
     // Try to extract JSON from the response
-    const jsonMatch = contentClean.match(/\[[\s\S]*\]/);
+    const jsonMatch = contentClean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
-        const rawItems = JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
         const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
         
         return {
@@ -413,7 +421,8 @@ const processImageWithOpenAI = async (base64Image) => {
     
     // If no JSON array found, try to parse the entire response
     try {
-      const rawItems = JSON.parse(contentClean);
+      const parsed = JSON.parse(contentClean);
+      const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
       const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
       return {
         items: items,
