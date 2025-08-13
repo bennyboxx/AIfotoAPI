@@ -315,7 +315,8 @@ const processImageWithOpenAI = async (base64Image) => {
                         height: { type: "integer", minimum: 1 }
                       }
                     }
-                  }
+                  },
+                  additionalProperties: false
                 }
               }
             },
