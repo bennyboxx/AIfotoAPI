@@ -280,7 +280,7 @@ const processImageWithOpenAI = async (base64Image) => {
           ]
         }
       ],
-      text: { format: "json" },
+      text: { format: { type: "json" } },
       max_output_tokens: 10000
     });
 
