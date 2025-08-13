@@ -176,6 +176,34 @@ const getImageDimensions = (base64Image) => {
 };
 
 /**
+ * Normalize bbox values to image bounds and integers
+ * @param {Array} items
+ * @param {number} imageWidth
+ * @param {number} imageHeight
+ * @returns {Array}
+ */
+const normalizeBoundingBoxes = (items, imageWidth, imageHeight) => {
+  if (!Array.isArray(items)) return items;
+  return items.map((item) => {
+    const b = item?.bbox;
+    if (!b || typeof b !== 'object') return { ...item, bbox: null };
+
+    let x = Number(b.x), y = Number(b.y), w = Number(b.width), h = Number(b.height);
+    if (![x, y, w, h].every((n) => Number.isFinite(n))) return { ...item, bbox: null };
+
+    x = Math.max(0, Math.min(Math.floor(x), imageWidth - 1));
+    y = Math.max(0, Math.min(Math.floor(y), imageHeight - 1));
+    w = Math.max(1, Math.floor(w));
+    h = Math.max(1, Math.floor(h));
+
+    if (x + w > imageWidth) w = Math.max(1, imageWidth - x);
+    if (y + h > imageHeight) h = Math.max(1, imageHeight - y);
+
+    return { ...item, bbox: { x, y, width: w, height: h } };
+  });
+};
+
+/**
  * Compress image to reduce token usage
  * @param {string} base64Image - Base64 encoded image
  * @param {number} maxWidth - Maximum width (default: 1024)
@@ -243,7 +271,7 @@ const processImageWithOpenAI = async (base64Image) => {
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes. Given an image, return ONLY a JSON array of all clearly visible and identifiable household items, each structured as:\n\n[\n  {\n    \"name\": \"Item name\",\n    \"description\": \"Brief description of the item\",\n    \"estimated_value\": 25.50,\n    \"quantity\": 1,\n    \"accuracy\": 0.95\n  }\n]\n\nRules:\n- All prices in euros (€), as numbers (no currency symbol).\n- Accuracy: confidence score (0.0 to 1.0).\n- Do not return anything but the JSON array.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items found.`
+              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON array. For each clearly visible and identifiable household item, return:\n\n[\n  {\n    \"name\": \"Item name\",\n    \"description\": \"Brief description\",\n    \"estimated_value\": 25.50,\n    \"quantity\": 1,\n    \"accuracy\": 0.95,\n    \"bbox\": { \"x\": 100, \"y\": 200, \"width\": 300, \"height\": 150 }\n  }\n]\n\nStrict rules:\n- Output must be ONLY a JSON array (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- bbox is REQUIRED and must be pixel coordinates relative to the provided image (top-left origin (0,0)), integers only, kept fully inside the image.\n- If an item cannot be confidently localized, omit that item.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the items.`
             },
             {
               type: "input_image",
@@ -284,7 +312,8 @@ const processImageWithOpenAI = async (base64Image) => {
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       try {
-        const items = JSON.parse(jsonMatch[0]);
+        const rawItems = JSON.parse(jsonMatch[0]);
+        const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
         
         return {
           items: items,
@@ -307,7 +336,8 @@ const processImageWithOpenAI = async (base64Image) => {
     
     // If no JSON array found, try to parse the entire response
     try {
-      const items = JSON.parse(content);
+      const rawItems = JSON.parse(content);
+      const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
       return {
         items: items,
         token_usage: {
