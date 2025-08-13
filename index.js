@@ -285,43 +285,73 @@ const processImageWithOpenAI = async (base64Image) => {
           type: "json_schema",
           name: "items_response",
           schema: {
-            strict: true,
-            schema: {
-              type: "array",
-              items: {
-                type: "object",
-                required: [
-                  "name",
-                  "description",
-                  "estimated_value",
-                  "quantity",
-                  "accuracy",
-                  "bbox"
-                ],
-                properties: {
-                  name: { type: "string" },
-                  description: { type: "string" },
-                  estimated_value: { type: "number" },
-                  quantity: { type: "integer", minimum: 1 },
-                  accuracy: { type: "number", minimum: 0, maximum: 1 },
-                  bbox: {
-                    type: "object",
-                    required: ["x", "y", "width", "height"],
-                    properties: {
-                      x: { type: "integer", minimum: 0 },
-                      y: { type: "integer", minimum: 0 },
-                      width: { type: "integer", minimum: 1 },
-                      height: { type: "integer", minimum: 1 }
-                    }
+            type: "array",
+            items: {
+              type: "object",
+              required: [
+                "name",
+                "description",
+                "estimated_value",
+                "quantity",
+                "accuracy",
+                "bbox"
+              ],
+              properties: {
+                name: { type: "string" },
+                description: { type: "string" },
+                estimated_value: { type: "number" },
+                quantity: { type: "integer", minimum: 1 },
+                accuracy: { type: "number", minimum: 0, maximum: 1 },
+                bbox: {
+                  type: "object",
+                  required: ["x", "y", "width", "height"],
+                  properties: {
+                    x: { type: "integer", minimum: 0 },
+                    y: { type: "integer", minimum: 0 },
+                    width: { type: "integer", minimum: 1 },
+                    height: { type: "integer", minimum: 1 }
                   }
                 }
               }
             }
-          }
+          },
+          strict: true
         }
       },
       max_output_tokens: 10000
     });
+
+    // format: {
+    //   type: "json_schema",
+    //   name: "math_response",
+    //   schema: {
+    //     type: "object",
+    //     properties: {
+    //       steps: {
+    //         type: "array",
+    //         items: {
+    //           type: "object",
+    //           properties: {
+    //             explanation: {
+    //               type: "string"
+    //             },
+    //             output: {
+    //               type: "string"
+    //             },
+    //           },
+    //           required: ["explanation", "output"],
+    //           additionalProperties: false,
+    //         },
+    //       },
+    //       final_answer: {
+    //         type: "string"
+    //       },
+    //     },
+    //     required: ["steps", "final_answer"],
+    //     additionalProperties: false,
+    //   },
+    //   strict: true,
+    // }
 
     const content = response.output_text || "";
     console.log('OpenAI response content:', content);
