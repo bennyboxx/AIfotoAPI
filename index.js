@@ -9,7 +9,7 @@ require('dotenv').config();
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_VERSION = '1.0.3';
+const API_VERSION = '1.0.4';
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -275,7 +275,7 @@ const processImageWithOpenAI = async (base64Image) => {
            ]
          }
        ],
-       max_tokens: 1000, // Reduced to save on completion tokens
+       max_completion_tokens: 10000, // Reduced to save on completion tokens
        temperature: 0.1
      });
 
