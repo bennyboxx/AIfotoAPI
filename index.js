@@ -9,7 +9,7 @@ require('dotenv').config();
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_VERSION = '1.0.2';
+const API_VERSION = '1.0.3';
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -236,7 +236,7 @@ const processImageWithOpenAI = async (base64Image) => {
   
   try {
          const response = await openai.chat.completions.create({
-       model: "gpt-4.1",
+       model: "gpt-5",
        messages: [
          {
            role: "system",
