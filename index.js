@@ -175,33 +175,7 @@ const getImageDimensions = (base64Image) => {
   }
 };
 
-/**
- * Normalize bbox values to image bounds and integers
- * @param {Array} items
- * @param {number} imageWidth
- * @param {number} imageHeight
- * @returns {Array}
- */
-const normalizeBoundingBoxes = (items, imageWidth, imageHeight) => {
-  if (!Array.isArray(items)) return items;
-  return items.map((item) => {
-    const b = item?.bbox;
-    if (!b || typeof b !== 'object') return { ...item, bbox: null };
-
-    let x = Number(b.x), y = Number(b.y), w = Number(b.width), h = Number(b.height);
-    if (![x, y, w, h].every((n) => Number.isFinite(n))) return { ...item, bbox: null };
-
-    x = Math.max(0, Math.min(Math.floor(x), imageWidth - 1));
-    y = Math.max(0, Math.min(Math.floor(y), imageHeight - 1));
-    w = Math.max(1, Math.floor(w));
-    h = Math.max(1, Math.floor(h));
-
-    if (x + w > imageWidth) w = Math.max(1, imageWidth - x);
-    if (y + h > imageHeight) h = Math.max(1, imageHeight - y);
-
-    return { ...item, bbox: { x, y, width: w, height: h } };
-  });
-};
+// bbox support removed; normalization helper deleted
 
 /**
  * Compress image to reduce token usage
@@ -264,14 +238,14 @@ const processImageWithOpenAI = async (base64Image) => {
   
   try {
     const response = await openai.responses.create({
-      model: "gpt-5",
+      model: "gpt-4o",
       input: [
         {
           role: "user",
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON object with an \'items\' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"bbox\": { \"x\": 100, \"y\": 200, \"width\": 300, \"height\": 150 }\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key \'items\' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- bbox is REQUIRED and must be pixel coordinates relative to the provided image (top-left origin (0,0)), integers only, kept fully inside the image.\n- If an item cannot be confidently localized, omit that item.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
+              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
             },
             {
               type: "input_image",
@@ -296,26 +270,14 @@ const processImageWithOpenAI = async (base64Image) => {
                     "description",
                     "estimated_value",
                     "quantity",
-                    "accuracy",
-                    "bbox"
+                    "accuracy"
                   ],
                   properties: {
                     name: { type: "string" },
                     description: { type: "string" },
                     estimated_value: { type: "number" },
                     quantity: { type: "integer", minimum: 1 },
-                    accuracy: { type: "number", minimum: 0, maximum: 1 },
-                    bbox: {
-                      type: "object",
-                      required: ["x", "y", "width", "height"],
-                      properties: {
-                        x: { type: "integer", minimum: 0 },
-                        y: { type: "integer", minimum: 0 },
-                        width: { type: "integer", minimum: 1 },
-                        height: { type: "integer", minimum: 1 }
-                      },
-                      additionalProperties: false
-                    }
+                    accuracy: { type: "number", minimum: 0, maximum: 1 }
                   },
                   additionalProperties: false
                 }
@@ -400,7 +362,7 @@ const processImageWithOpenAI = async (base64Image) => {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
         const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
-        const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
+        const items = rawItems;
         
         return {
           items: items,
@@ -425,7 +387,7 @@ const processImageWithOpenAI = async (base64Image) => {
     try {
       const parsed = JSON.parse(contentClean);
       const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
-      const items = normalizeBoundingBoxes(rawItems, imageWidth, imageHeight);
+      const items = rawItems;
       return {
         items: items,
         token_usage: {
@@ -553,7 +515,7 @@ app.get('/', (req, res) => {
 app.get('/test-openai', async (req, res) => {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
