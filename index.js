@@ -422,6 +422,177 @@ const processImageWithOpenAI = async (base64Image) => {
 };
 
 /**
+ * Process single item with OpenAI Vision API
+ * @param {string} base64Image - Base64 encoded image
+ * @param {string|null} itemDescription - Optional description of the item to focus on
+ * @returns {Object} OpenAI response with single item details and token usage
+ */
+const processSingleItemWithOpenAI = async (base64Image, itemDescription = null) => {
+  // Compress image to reduce token usage
+  const compressedImage = await compressImage(base64Image, 1024, 1024);
+  
+  // Get image dimensions
+  const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
+  
+  // Create prompt based on whether item description is provided
+  let promptText;
+  if (itemDescription) {
+    promptText = `You are an expert in visually analyzing household items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+  } else {
+    promptText = `You are an expert in visually analyzing household items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+  }
+  
+  try {
+    const response = await openai.responses.create({
+      model: "gpt-4o",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: promptText
+            },
+            {
+              type: "input_image",
+              image_url: `data:image/jpeg;base64,${compressedImage}`
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "single_item_response",
+          schema: {
+            type: "object",
+            properties: {
+              item: {
+                type: "object",
+                required: [
+                  "name",
+                  "description",
+                  "estimated_value",
+                  "quantity",
+                  "accuracy"
+                ],
+                properties: {
+                  name: { type: "string" },
+                  description: { type: "string" },
+                  estimated_value: { type: "number" },
+                  quantity: { type: "integer", minimum: 1 },
+                  accuracy: { type: "number", minimum: 0, maximum: 1 }
+                },
+                additionalProperties: false
+              }
+            },
+            required: ["item"],
+            additionalProperties: false
+          },
+          strict: true
+        }
+      },
+      max_output_tokens: 10000
+    });
+
+    const content = response.output_text || "";
+    console.log('OpenAI response content:', content);
+    
+    // Clean possible code fences
+    const contentClean = content
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
+    
+    // Extract token usage information
+    const tokenUsage = response.usage || {};
+    const promptTokens = tokenUsage.input_tokens || tokenUsage.prompt_tokens || 0;
+    const completionTokens = tokenUsage.output_tokens || tokenUsage.completion_tokens || 0;
+    const totalTokens = tokenUsage.total_tokens || (promptTokens + completionTokens);
+    
+    // Log detailed token usage
+    const estimatedImageTokens = Math.ceil((imageWidth * imageHeight) / 768);
+    
+    console.log('Token usage details:', {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: totalTokens,
+      image_dimensions: `${imageWidth}x${imageHeight}`,
+      estimated_image_tokens: estimatedImageTokens
+    });
+    
+    // Warn if token usage is high
+    if (totalTokens > 15000) {
+      console.warn(`High token usage detected: ${totalTokens} tokens. Consider using smaller images.`);
+    }
+    
+    // Parse JSON response
+    const jsonMatch = contentClean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (!parsed.item) {
+          throw new Error('Response missing "item" field');
+        }
+        
+        return {
+          item: parsed.item,
+          token_usage: {
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: totalTokens,
+            input_tokens: promptTokens,
+            output_tokens: completionTokens
+          },
+          warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
+        };
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        throw new Error('Invalid JSON format in OpenAI response');
+      }
+    }
+    
+    // Try to parse entire response
+    try {
+      const parsed = JSON.parse(contentClean);
+      if (!parsed.item) {
+        throw new Error('Response missing "item" field');
+      }
+      
+      return {
+        item: parsed.item,
+        token_usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
+          input_tokens: promptTokens,
+          output_tokens: completionTokens
+        },
+        warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
+      };
+    } catch (parseError) {
+      console.error('JSON parse error for full content:', parseError);
+      console.error('Raw content:', contentClean);
+      throw new Error('OpenAI response is not valid JSON');
+    }
+  } catch (error) {
+    console.error('OpenAI API error:', error);
+    
+    if (error.response) {
+      console.error('OpenAI API response error:', error.response.data);
+      throw new Error(`OpenAI API error: ${error.response.data.error?.message || error.response.statusText}`);
+    } else if (error.request) {
+      console.error('OpenAI API request error:', error.request);
+      throw new Error('OpenAI API request failed - no response received');
+    } else {
+      console.error('OpenAI API setup error:', error.message);
+      throw new Error(`OpenAI API error: ${error.message}`);
+    }
+  }
+};
+
+/**
  * POST /process - Process image and detect household items
  * Body: { "image_url": "string", "user_id": "string" }
  * Headers: Authorization: Bearer <Firebase_ID_Token>
@@ -483,6 +654,78 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
 });
 
 /**
+ * POST /process-single - Process image and analyze a single specific item
+ * Body: { "image_url": "string", "user_id": "string", "item_name": "string (optional)" }
+ * Headers: Authorization: Bearer <Firebase_ID_Token>
+ */
+app.post('/process-single', verifyFirebaseToken, async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const { image_url, user_id, item_name } = req.body;
+    
+    // Validate input - item_name is optional
+    if (!image_url || !user_id) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: image_url and user_id are required' 
+      });
+    }
+
+    // Validate user_id matches the authenticated user
+    if (req.user.uid !== user_id) {
+      return res.status(403).json({ 
+        error: 'User ID does not match authenticated user' 
+      });
+    }
+
+    if (item_name) {
+      console.log(`Processing single item "${item_name}" for user ${user_id}`);
+    } else {
+      console.log(`Processing most prominent item for user ${user_id}`);
+    }
+
+    // Download and encode image
+    const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
+    
+    // Process with OpenAI Vision - single item focus
+    const result = await processSingleItemWithOpenAI(base64Image, item_name);
+    
+    // Delete image from Firebase Storage after processing
+    const deleteSuccess = await deleteImageFromFirebase(filePath);
+    
+    const processingTime = (Date.now() - startTime) / 1000;
+    
+    const response = {
+      version: API_VERSION,
+      item: result.item,
+      token_usage: result.token_usage,
+      warnings: result.warnings || [],
+      processing_time: processingTime,
+      user_id: user_id,
+      image_deleted: deleteSuccess
+    };
+    
+    // Only include searched_for if item_name was provided
+    if (item_name) {
+      response.searched_for = item_name;
+    }
+    
+    res.json(response);
+
+  } catch (error) {
+    console.error('Error processing single item:', error);
+    const processingTime = (Date.now() - startTime) / 1000;
+    
+    res.status(500).json({
+      version: API_VERSION,
+      error: 'Failed to process single item',
+      processing_time: processingTime,
+      details: error.message
+    });
+  }
+});
+
+/**
  * GET /health - Health check endpoint
  */
 app.get('/health', (req, res) => {
@@ -502,7 +745,8 @@ app.get('/', (req, res) => {
     message: 'Track My Home API',
     version: API_VERSION,
     endpoints: {
-      'POST /process': 'Process image and detect household items',
+      'POST /process': 'Process image and detect all household items',
+      'POST /process-single': 'Process image and analyze a specific item',
       'GET /health': 'Health check',
       'GET /test-openai': 'Test OpenAI API connection'
     }

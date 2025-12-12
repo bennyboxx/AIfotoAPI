@@ -57,7 +57,7 @@ Backend API voor de Flutter-app "Track My Home" die afbeeldingen verwerkt met Op
 ## 📡 API Endpoints
 
 ### POST /process
-Verwerkt een afbeelding en detecteert huishouditems.
+Verwerkt een afbeelding en detecteert alle huishouditems.
 
 **Headers:**
 ```
@@ -76,24 +76,95 @@ Content-Type: application/json
 **Response:**
 ```json
 {
+  "version": "1.0.4",
   "items": [
     {
       "name": "Laptop",
       "description": "MacBook Pro 13-inch",
       "estimated_value": 1200.00,
-      "quantity": 1
+      "quantity": 1,
+      "accuracy": 0.95
     },
     {
       "name": "Koffiezetapparaat",
       "description": "Philips Senseo",
       "estimated_value": 89.99,
-      "quantity": 1
+      "quantity": 1,
+      "accuracy": 0.92
     }
   ],
+  "token_usage": {
+    "prompt_tokens": 1250,
+    "completion_tokens": 180,
+    "total_tokens": 1430
+  },
   "processing_time": 3.7,
+  "user_id": "firebase_user_uid",
+  "image_deleted": true
+}
+```
+
+### POST /process-single
+Verwerkt een afbeelding en analyseert **één specifiek item** in detail.
+
+**Headers:**
+```
+Authorization: Bearer <Firebase_ID_Token>
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "image_url": "https://firebasestorage.googleapis.com/...",
+  "user_id": "firebase_user_uid",
+  "item_name": "laptop"  // OPTIONEEL - als niet gegeven, wordt meest prominente item geanalyseerd
+}
+```
+
+**Twee modes:**
+
+1. **Met `item_name`** - Analyseert specifiek item:
+```json
+{
+  "image_url": "https://firebasestorage.googleapis.com/...",
+  "user_id": "firebase_user_uid",
+  "item_name": "laptop"
+}
+```
+
+2. **Zonder `item_name`** - Analyseert meest prominente/waardevolle item:
+```json
+{
+  "image_url": "https://firebasestorage.googleapis.com/...",
   "user_id": "firebase_user_uid"
 }
 ```
+
+**Response:**
+```json
+{
+  "version": "1.0.4",
+  "item": {
+    "name": "Laptop",
+    "description": "MacBook Pro 13-inch with silver finish and visible Apple logo. Condition: Good with minimal wear. Brand: Apple, Model: MacBook Pro 13-inch. The laptop appears well-maintained with no visible damage.",
+    "estimated_value": 1200.00,
+    "quantity": 1,
+    "accuracy": 0.95
+  },
+  "token_usage": {
+    "prompt_tokens": 1180,
+    "completion_tokens": 145,
+    "total_tokens": 1325
+  },
+  "processing_time": 2.9,
+  "user_id": "firebase_user_uid",
+  "image_deleted": true,
+  "searched_for": "laptop"  // alleen aanwezig als item_name was opgegeven
+}
+```
+
+**Note:** Alle details (conditie, merk, model, etc.) worden opgenomen in het `description` veld.
 
 ### GET /health
 Health check endpoint.
@@ -112,9 +183,11 @@ Root endpoint met API informatie.
 
 ## 🔐 Authenticatie
 
-De API gebruikt Firebase Authentication. Elke request naar `/process` moet een geldige Firebase ID-token bevatten in de Authorization header.
+De API gebruikt Firebase Authentication. Elke request naar `/process` of `/process-single` moet een geldige Firebase ID-token bevatten in de Authorization header.
 
-**Flutter voorbeeld:**
+**Flutter voorbeelden:**
+
+### Alle items detecteren
 ```dart
 final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
 final response = await http.post(
@@ -126,6 +199,40 @@ final response = await http.post(
   body: jsonEncode({
     'image_url': imageUrl,
     'user_id': FirebaseAuth.instance.currentUser?.uid,
+  }),
+);
+```
+
+### Specifiek item analyseren (met item naam)
+```dart
+final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+final response = await http.post(
+  Uri.parse('https://your-api.com/process-single'),
+  headers: {
+    'Authorization': 'Bearer $idToken',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({
+    'image_url': imageUrl,
+    'user_id': FirebaseAuth.instance.currentUser?.uid,
+    'item_name': 'laptop', // Optioneel
+  }),
+);
+```
+
+### Meest prominente item analyseren (zonder item naam)
+```dart
+final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+final response = await http.post(
+  Uri.parse('https://your-api.com/process-single'),
+  headers: {
+    'Authorization': 'Bearer $idToken',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({
+    'image_url': imageUrl,
+    'user_id': FirebaseAuth.instance.currentUser?.uid,
+    // Geen item_name = analyseert meest prominente item
   }),
 );
 ```
