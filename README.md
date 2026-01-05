@@ -6,6 +6,7 @@ Backend API voor de Flutter-app "Track My Home" die afbeeldingen verwerkt met Op
 
 - **Firebase Authentication**: Verificatie van gebruikers via Firebase ID-tokens
 - **OpenAI Vision Integration**: Analyse van afbeeldingen met GPT-4o Vision
+- **Multi-language Support**: Ondersteuning voor meerdere talen (NL, EN, FR, DE, ES, IT, PT)
 - **Image Processing**: Download en verwerking van afbeeldingen van Firebase Storage
 - **Rate Limiting**: Bescherming tegen overmatige API-aanroepen
 - **Security**: Helmet.js voor beveiligingsheaders
@@ -69,25 +70,37 @@ Content-Type: application/json
 ```json
 {
   "image_url": "https://firebasestorage.googleapis.com/...",
-  "user_id": "firebase_user_uid"
+  "user_id": "firebase_user_uid",
+  "language": "nl"  // OPTIONEEL - Taalcode voor output (standaard: 'en')
 }
 ```
 
-**Response:**
+**Ondersteunde talen:**
+- `en` - Engels (standaard)
+- `nl` - Nederlands
+- `fr` - Frans
+- `de` - Duits
+- `es` - Spaans
+- `it` - Italiaans
+- `pt` - Portugees
+
+**Note:** De `name` en `description` velden worden in de opgegeven taal geretourneerd.
+
+**Response (met language: 'nl'):**
 ```json
 {
   "version": "1.0.4",
   "items": [
     {
       "name": "Laptop",
-      "description": "MacBook Pro 13-inch",
+      "description": "MacBook Pro 13-inch in goede staat",
       "estimated_value": 1200.00,
       "quantity": 1,
       "accuracy": 0.95
     },
     {
       "name": "Koffiezetapparaat",
-      "description": "Philips Senseo",
+      "description": "Philips Senseo koffiezetapparaat",
       "estimated_value": 89.99,
       "quantity": 1,
       "accuracy": 0.92
@@ -104,6 +117,8 @@ Content-Type: application/json
 }
 ```
 
+**Note:** De output taal kan worden gespecificeerd via de `language` parameter. Zonder deze parameter wordt Engels gebruikt.
+
 ### POST /process-single
 Verwerkt een afbeelding en analyseert **één specifiek item** in detail.
 
@@ -118,7 +133,8 @@ Content-Type: application/json
 {
   "image_url": "https://firebasestorage.googleapis.com/...",
   "user_id": "firebase_user_uid",
-  "item_name": "laptop"  // OPTIONEEL - als niet gegeven, wordt meest prominente item geanalyseerd
+  "item_name": "laptop",  // OPTIONEEL - als niet gegeven, wordt meest prominente item geanalyseerd
+  "language": "nl"  // OPTIONEEL - Taalcode voor output (standaard: 'en')
 }
 ```
 
@@ -141,13 +157,13 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
+**Response (met language: 'nl'):**
 ```json
 {
   "version": "1.0.4",
   "item": {
     "name": "Laptop",
-    "description": "MacBook Pro 13-inch with silver finish and visible Apple logo. Condition: Good with minimal wear. Brand: Apple, Model: MacBook Pro 13-inch. The laptop appears well-maintained with no visible damage.",
+    "description": "MacBook Pro 13-inch met zilveren afwerking en zichtbaar Apple-logo. Conditie: Goed met minimale slijtage. Merk: Apple, Model: MacBook Pro 13-inch. De laptop lijkt goed onderhouden zonder zichtbare schade.",
     "estimated_value": 1200.00,
     "quantity": 1,
     "accuracy": 0.95
@@ -164,7 +180,9 @@ Content-Type: application/json
 }
 ```
 
-**Note:** Alle details (conditie, merk, model, etc.) worden opgenomen in het `description` veld.
+**Note:** 
+- Alle details (conditie, merk, model, etc.) worden opgenomen in het `description` veld.
+- De output taal kan worden gespecificeerd via de `language` parameter. Zonder deze parameter wordt Engels gebruikt.
 
 ### GET /health
 Health check endpoint.
@@ -199,6 +217,7 @@ final response = await http.post(
   body: jsonEncode({
     'image_url': imageUrl,
     'user_id': FirebaseAuth.instance.currentUser?.uid,
+    'language': 'nl', // Optioneel - voor Nederlandse output
   }),
 );
 ```
@@ -216,6 +235,7 @@ final response = await http.post(
     'image_url': imageUrl,
     'user_id': FirebaseAuth.instance.currentUser?.uid,
     'item_name': 'laptop', // Optioneel
+    'language': 'nl', // Optioneel - voor Nederlandse output
   }),
 );
 ```
@@ -232,6 +252,7 @@ final response = await http.post(
   body: jsonEncode({
     'image_url': imageUrl,
     'user_id': FirebaseAuth.instance.currentUser?.uid,
+    'language': 'nl', // Optioneel - voor Nederlandse output
     // Geen item_name = analyseert meest prominente item
   }),
 );

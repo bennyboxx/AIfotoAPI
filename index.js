@@ -227,14 +227,30 @@ const compressImage = async (base64Image, maxWidth = 1024, maxHeight = 1024) => 
 /**
  * Process image with OpenAI Vision API
  * @param {string} base64Image - Base64 encoded image
+ * @param {string} language - Language for the output (default: 'en' for English)
  * @returns {Object} OpenAI response with detected items and token usage
  */
-const processImageWithOpenAI = async (base64Image) => {
+const processImageWithOpenAI = async (base64Image, language = 'en') => {
   // Compress image to reduce token usage
   const compressedImage = await compressImage(base64Image, 1024, 1024);
   
   // Get image dimensions
   const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
+  
+  // Determine language instruction
+  let languageInstruction = '';
+  if (language && language !== 'en') {
+    const languageNames = {
+      'nl': 'Dutch',
+      'fr': 'French',
+      'de': 'German',
+      'es': 'Spanish',
+      'it': 'Italian',
+      'pt': 'Portuguese'
+    };
+    const languageName = languageNames[language.toLowerCase()] || language;
+    languageInstruction = `\n- IMPORTANT: All text fields (name and description) MUST be in ${languageName}.`;
+  }
   
   try {
     const response = await openai.responses.create({
@@ -245,7 +261,7 @@ const processImageWithOpenAI = async (base64Image) => {
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
+              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
             },
             {
               type: "input_image",
@@ -425,21 +441,37 @@ const processImageWithOpenAI = async (base64Image) => {
  * Process single item with OpenAI Vision API
  * @param {string} base64Image - Base64 encoded image
  * @param {string|null} itemDescription - Optional description of the item to focus on
+ * @param {string} language - Language for the output (default: 'en' for English)
  * @returns {Object} OpenAI response with single item details and token usage
  */
-const processSingleItemWithOpenAI = async (base64Image, itemDescription = null) => {
+const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, language = 'en') => {
   // Compress image to reduce token usage
   const compressedImage = await compressImage(base64Image, 1024, 1024);
   
   // Get image dimensions
   const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
   
+  // Determine language instruction
+  let languageInstruction = '';
+  if (language && language !== 'en') {
+    const languageNames = {
+      'nl': 'Dutch',
+      'fr': 'French',
+      'de': 'German',
+      'es': 'Spanish',
+      'it': 'Italian',
+      'pt': 'Portuguese'
+    };
+    const languageName = languageNames[language.toLowerCase()] || language;
+    languageInstruction = `\n- IMPORTANT: All text fields (name and description) MUST be in ${languageName}.`;
+  }
+  
   // Create prompt based on whether item description is provided
   let promptText;
   if (itemDescription) {
-    promptText = `You are an expert in visually analyzing household items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   } else {
-    promptText = `You are an expert in visually analyzing household items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   }
   
   try {
@@ -594,14 +626,14 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null) 
 
 /**
  * POST /process - Process image and detect household items
- * Body: { "image_url": "string", "user_id": "string" }
+ * Body: { "image_url": "string", "user_id": "string", "language": "string (optional, default: 'en')" }
  * Headers: Authorization: Bearer <Firebase_ID_Token>
  */
 app.post('/process', verifyFirebaseToken, async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { image_url, user_id } = req.body;
+    const { image_url, user_id, language } = req.body;
     
     // Validate input
     if (!image_url || !user_id) {
@@ -617,13 +649,14 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
       });
     }
 
-    console.log(`Processing image for user ${user_id}`);
+    const requestedLanguage = language || 'en';
+    console.log(`Processing image for user ${user_id} in language: ${requestedLanguage}`);
 
     // Download and encode image
     const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
     
     // Process with OpenAI Vision
-    const result = await processImageWithOpenAI(base64Image);
+    const result = await processImageWithOpenAI(base64Image, requestedLanguage);
     
     // Delete image from Firebase Storage after processing
     const deleteSuccess = await deleteImageFromFirebase(filePath);
@@ -655,16 +688,16 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
 
 /**
  * POST /process-single - Process image and analyze a single specific item
- * Body: { "image_url": "string", "user_id": "string", "item_name": "string (optional)" }
+ * Body: { "image_url": "string", "user_id": "string", "item_name": "string (optional)", "language": "string (optional, default: 'en')" }
  * Headers: Authorization: Bearer <Firebase_ID_Token>
  */
 app.post('/process-single', verifyFirebaseToken, async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { image_url, user_id, item_name } = req.body;
+    const { image_url, user_id, item_name, language } = req.body;
     
-    // Validate input - item_name is optional
+    // Validate input - item_name and language are optional
     if (!image_url || !user_id) {
       return res.status(400).json({ 
         error: 'Missing required fields: image_url and user_id are required' 
@@ -678,17 +711,18 @@ app.post('/process-single', verifyFirebaseToken, async (req, res) => {
       });
     }
 
+    const requestedLanguage = language || 'en';
     if (item_name) {
-      console.log(`Processing single item "${item_name}" for user ${user_id}`);
+      console.log(`Processing single item "${item_name}" for user ${user_id} in language: ${requestedLanguage}`);
     } else {
-      console.log(`Processing most prominent item for user ${user_id}`);
+      console.log(`Processing most prominent item for user ${user_id} in language: ${requestedLanguage}`);
     }
 
     // Download and encode image
     const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
     
     // Process with OpenAI Vision - single item focus
-    const result = await processSingleItemWithOpenAI(base64Image, item_name);
+    const result = await processSingleItemWithOpenAI(base64Image, item_name, requestedLanguage);
     
     // Delete image from Firebase Storage after processing
     const deleteSuccess = await deleteImageFromFirebase(filePath);
