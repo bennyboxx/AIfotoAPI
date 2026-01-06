@@ -316,7 +316,7 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
                         album: { type: "string" },
                         release_year: { type: "integer" }
                       },
-                      required: ["artist", "album"],
+                      required: ["artist", "album", "release_year"],
                       additionalProperties: false
                     }
                   },
@@ -558,7 +558,7 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
                       album: { type: "string" },
                       release_year: { type: "integer" }
                     },
-                    required: ["artist", "album"],
+                    required: ["artist", "album", "release_year"],
                     additionalProperties: false
                   }
                 },
