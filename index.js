@@ -264,7 +264,7 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes, with special attention to collectible items. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"item_type\": \"wine\" or \"vinyl\" or \"general\",\n      \"wine_details\": {\"winery\": \"Château Name\", \"vintage\": 2015, \"wine_name\": \"Full wine name\"},\n      \"vinyl_details\": {\"artist\": \"Artist Name\", \"album\": \"Album Title\", \"release_year\": 1973}\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- wine_details: ONLY include if item_type is "wine". Extract winery name, vintage year, and full wine name from label.\n- vinyl_details: ONLY include if item_type is "vinyl". Extract artist, album title, and release year if visible.\n- For general items, do NOT include wine_details or vinyl_details.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
+              text: `You are an expert in visually analyzing household scenes, with special attention to collectible items. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"item_type\": \"wine\" or \"vinyl\" or \"general\",\n      \"collector_details\": {\n        \"winery\": \"Château Name\" or null,\n        \"vintage\": 2015 or null,\n        \"wine_name\": \"Full wine name\" or null,\n        \"artist\": \"Artist Name\" or null,\n        \"album\": \"Album Title\" or null,\n        \"release_year\": 1973 or null\n      }\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
             },
             {
               type: "input_image",
@@ -290,7 +290,8 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
                     "estimated_value",
                     "quantity",
                     "accuracy",
-                    "item_type"
+                    "item_type",
+                    "collector_details"
                   ],
                   properties: {
                     name: { type: "string" },
@@ -299,24 +300,17 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
                     quantity: { type: "integer", minimum: 1 },
                     accuracy: { type: "number", minimum: 0, maximum: 1 },
                     item_type: { type: "string", enum: ["wine", "vinyl", "general"] },
-                    wine_details: {
+                    collector_details: {
                       type: "object",
                       properties: {
-                        winery: { type: "string" },
-                        vintage: { type: "integer" },
-                        wine_name: { type: "string" }
+                        winery: { type: ["string", "null"] },
+                        vintage: { type: ["integer", "null"] },
+                        wine_name: { type: ["string", "null"] },
+                        artist: { type: ["string", "null"] },
+                        album: { type: ["string", "null"] },
+                        release_year: { type: ["integer", "null"] }
                       },
-                      required: ["winery", "vintage", "wine_name"],
-                      additionalProperties: false
-                    },
-                    vinyl_details: {
-                      type: "object",
-                      properties: {
-                        artist: { type: "string" },
-                        album: { type: "string" },
-                        release_year: { type: "integer" }
-                      },
-                      required: ["artist", "album", "release_year"],
+                      required: ["winery", "vintage", "wine_name", "artist", "album", "release_year"],
                       additionalProperties: false
                     }
                   },
@@ -494,9 +488,9 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
   // Create prompt based on whether item description is provided
   let promptText;
   if (itemDescription) {
-    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "wine_details": {"winery": "Château Name", "vintage": 2015, "wine_name": "Full wine name"},\n    "vinyl_details": {"artist": "Artist Name", "album": "Album Title", "release_year": 1973}\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- wine_details: ONLY include if item_type is "wine". Extract winery name, vintage year, and full wine name from label.\n- vinyl_details: ONLY include if item_type is "vinyl". Extract artist, album title, and release year if visible.\n- For general items, do NOT include wine_details or vinyl_details.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "collector_details": {\n      "winery": "Château Name" or null,\n      "vintage": 2015 or null,\n      "wine_name": "Full wine name" or null,\n      "artist": "Artist Name" or null,\n      "album": "Album Title" or null,\n      "release_year": 1973 or null\n    }\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   } else {
-    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "wine_details": {"winery": "Château Name", "vintage": 2015, "wine_name": "Full wine name"},\n    "vinyl_details": {"artist": "Artist Name", "album": "Album Title", "release_year": 1973}\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- wine_details: ONLY include if item_type is "wine". Extract winery name, vintage year, and full wine name from label.\n- vinyl_details: ONLY include if item_type is "vinyl". Extract artist, album title, and release year if visible.\n- For general items, do NOT include wine_details or vinyl_details.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "collector_details": {\n      "winery": "Château Name" or null,\n      "vintage": 2015 or null,\n      "wine_name": "Full wine name" or null,\n      "artist": "Artist Name" or null,\n      "album": "Album Title" or null,\n      "release_year": 1973 or null\n    }\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   }
   
   try {
@@ -532,7 +526,8 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
                   "estimated_value",
                   "quantity",
                   "accuracy",
-                  "item_type"
+                  "item_type",
+                  "collector_details"
                 ],
                 properties: {
                   name: { type: "string" },
@@ -541,24 +536,17 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
                   quantity: { type: "integer", minimum: 1 },
                   accuracy: { type: "number", minimum: 0, maximum: 1 },
                   item_type: { type: "string", enum: ["wine", "vinyl", "general"] },
-                  wine_details: {
+                  collector_details: {
                     type: "object",
                     properties: {
-                      winery: { type: "string" },
-                      vintage: { type: "integer" },
-                      wine_name: { type: "string" }
+                      winery: { type: ["string", "null"] },
+                      vintage: { type: ["integer", "null"] },
+                      wine_name: { type: ["string", "null"] },
+                      artist: { type: ["string", "null"] },
+                      album: { type: ["string", "null"] },
+                      release_year: { type: ["integer", "null"] }
                     },
-                    required: ["winery", "vintage", "wine_name"],
-                    additionalProperties: false
-                  },
-                  vinyl_details: {
-                    type: "object",
-                    properties: {
-                      artist: { type: "string" },
-                      album: { type: "string" },
-                      release_year: { type: "integer" }
-                    },
-                    required: ["artist", "album", "release_year"],
+                    required: ["winery", "vintage", "wine_name", "artist", "album", "release_year"],
                     additionalProperties: false
                   }
                 },

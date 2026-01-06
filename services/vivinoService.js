@@ -150,8 +150,8 @@ function getWineType(typeId) {
  */
 async function enrichWineItem(item) {
   try {
-    // Check if we have wine details from OpenAI
-    if (!item.wine_details) {
+    // Check if we have wine details from OpenAI (now in collector_details)
+    if (!item.collector_details || !item.collector_details.wine_name) {
       console.log('[Vivino] No wine details provided, skipping enrichment');
       return {
         ...item,
@@ -161,7 +161,7 @@ async function enrichWineItem(item) {
       };
     }
 
-    const { wine_name, winery, vintage } = item.wine_details;
+    const { wine_name, winery, vintage } = item.collector_details;
     
     // Search Vivino
     const searchQuery = wine_name || `${winery}`;

@@ -288,8 +288,8 @@ function formatFormats(formats) {
  */
 async function enrichVinylItem(item) {
   try {
-    // Check if we have vinyl details from OpenAI
-    if (!item.vinyl_details) {
+    // Check if we have vinyl details from OpenAI (now in collector_details)
+    if (!item.collector_details || !item.collector_details.artist) {
       console.log('[Discogs] No vinyl details provided, skipping enrichment');
       return {
         ...item,
@@ -299,7 +299,7 @@ async function enrichVinylItem(item) {
       };
     }
 
-    const { artist, album, release_year } = item.vinyl_details;
+    const { artist, album, release_year } = item.collector_details;
     
     // Search Discogs
     const discogsData = await searchVinyl(artist, album, release_year);
