@@ -6,6 +6,9 @@ const admin = require('firebase-admin');
 const OpenAI = require('openai');
 require('dotenv').config();
 
+// Import collector services
+const { processCollectorItems, processCollectorItem, getCollectorStats } = require('./services/collectorService');
+
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -261,7 +264,7 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
+              text: `You are an expert in visually analyzing household scenes, with special attention to collectible items. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"item_type\": \"wine\" or \"vinyl\" or \"general\",\n      \"wine_details\": {\"winery\": \"Château Name\", \"vintage\": 2015, \"wine_name\": \"Full wine name\"},\n      \"vinyl_details\": {\"artist\": \"Artist Name\", \"album\": \"Album Title\", \"release_year\": 1973}\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- wine_details: ONLY include if item_type is "wine". Extract winery name, vintage year, and full wine name from label.\n- vinyl_details: ONLY include if item_type is "vinyl". Extract artist, album title, and release year if visible.\n- For general items, do NOT include wine_details or vinyl_details.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
             },
             {
               type: "input_image",
@@ -286,14 +289,36 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
                     "description",
                     "estimated_value",
                     "quantity",
-                    "accuracy"
+                    "accuracy",
+                    "item_type"
                   ],
                   properties: {
                     name: { type: "string" },
                     description: { type: "string" },
                     estimated_value: { type: "number" },
                     quantity: { type: "integer", minimum: 1 },
-                    accuracy: { type: "number", minimum: 0, maximum: 1 }
+                    accuracy: { type: "number", minimum: 0, maximum: 1 },
+                    item_type: { type: "string", enum: ["wine", "vinyl", "general"] },
+                    wine_details: {
+                      type: "object",
+                      properties: {
+                        winery: { type: "string" },
+                        vintage: { type: "integer" },
+                        wine_name: { type: "string" }
+                      },
+                      required: ["winery", "vintage", "wine_name"],
+                      additionalProperties: false
+                    },
+                    vinyl_details: {
+                      type: "object",
+                      properties: {
+                        artist: { type: "string" },
+                        album: { type: "string" },
+                        release_year: { type: "integer" }
+                      },
+                      required: ["artist", "album"],
+                      additionalProperties: false
+                    }
                   },
                   additionalProperties: false
                 }
@@ -469,9 +494,9 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
   // Create prompt based on whether item description is provided
   let promptText;
   if (itemDescription) {
-    promptText = `You are an expert in visually analyzing household items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "wine_details": {"winery": "Château Name", "vintage": 2015, "wine_name": "Full wine name"},\n    "vinyl_details": {"artist": "Artist Name", "album": "Album Title", "release_year": 1973}\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- wine_details: ONLY include if item_type is "wine". Extract winery name, vintage year, and full wine name from label.\n- vinyl_details: ONLY include if item_type is "vinyl". Extract artist, album title, and release year if visible.\n- For general items, do NOT include wine_details or vinyl_details.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   } else {
-    promptText = `You are an expert in visually analyzing household items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "wine_details": {"winery": "Château Name", "vintage": 2015, "wine_name": "Full wine name"},\n    "vinyl_details": {"artist": "Artist Name", "album": "Album Title", "release_year": 1973}\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- wine_details: ONLY include if item_type is "wine". Extract winery name, vintage year, and full wine name from label.\n- vinyl_details: ONLY include if item_type is "vinyl". Extract artist, album title, and release year if visible.\n- For general items, do NOT include wine_details or vinyl_details.${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   }
   
   try {
@@ -506,14 +531,36 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
                   "description",
                   "estimated_value",
                   "quantity",
-                  "accuracy"
+                  "accuracy",
+                  "item_type"
                 ],
                 properties: {
                   name: { type: "string" },
                   description: { type: "string" },
                   estimated_value: { type: "number" },
                   quantity: { type: "integer", minimum: 1 },
-                  accuracy: { type: "number", minimum: 0, maximum: 1 }
+                  accuracy: { type: "number", minimum: 0, maximum: 1 },
+                  item_type: { type: "string", enum: ["wine", "vinyl", "general"] },
+                  wine_details: {
+                    type: "object",
+                    properties: {
+                      winery: { type: "string" },
+                      vintage: { type: "integer" },
+                      wine_name: { type: "string" }
+                    },
+                    required: ["winery", "vintage", "wine_name"],
+                    additionalProperties: false
+                  },
+                  vinyl_details: {
+                    type: "object",
+                    properties: {
+                      artist: { type: "string" },
+                      album: { type: "string" },
+                      release_year: { type: "integer" }
+                    },
+                    required: ["artist", "album"],
+                    additionalProperties: false
+                  }
                 },
                 additionalProperties: false
               }
@@ -658,6 +705,12 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     // Process with OpenAI Vision
     const result = await processImageWithOpenAI(base64Image, requestedLanguage);
     
+    // Enrich collector items with external API data
+    const enrichedItems = await processCollectorItems(result.items);
+    
+    // Get collector statistics
+    const collectorStats = getCollectorStats(enrichedItems);
+    
     // Delete image from Firebase Storage after processing
     const deleteSuccess = await deleteImageFromFirebase(filePath);
     
@@ -665,12 +718,13 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     
     res.json({
       version: API_VERSION,
-      items: result.items,
+      items: enrichedItems,
       token_usage: result.token_usage,
       warnings: result.warnings || [],
       processing_time: processingTime,
       user_id: user_id,
-      image_deleted: deleteSuccess
+      image_deleted: deleteSuccess,
+      collector_stats: collectorStats
     });
 
   } catch (error) {
@@ -724,6 +778,9 @@ app.post('/process-single', verifyFirebaseToken, async (req, res) => {
     // Process with OpenAI Vision - single item focus
     const result = await processSingleItemWithOpenAI(base64Image, item_name, requestedLanguage);
     
+    // Enrich collector item with external API data
+    const enrichedItem = await processCollectorItem(result.item);
+    
     // Delete image from Firebase Storage after processing
     const deleteSuccess = await deleteImageFromFirebase(filePath);
     
@@ -731,7 +788,7 @@ app.post('/process-single', verifyFirebaseToken, async (req, res) => {
     
     const response = {
       version: API_VERSION,
-      item: result.item,
+      item: enrichedItem,
       token_usage: result.token_usage,
       warnings: result.warnings || [],
       processing_time: processingTime,
