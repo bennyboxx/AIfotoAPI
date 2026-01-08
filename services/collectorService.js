@@ -14,27 +14,50 @@ const { enrichVinylItem } = require('./discogsService');
  */
 async function processCollectorItem(item) {
   try {
-    // Check item_type from OpenAI
-    const itemType = item.item_type;
-
-    console.log(`[Collector] Processing item: ${item.name} (type: ${itemType})`);
-
-    // Route to appropriate enrichment service
-    switch (itemType) {
-      case 'wine':
-        return await enrichWineItem(item);
-      
-      case 'vinyl':
-        return await enrichVinylItem(item);
-      
-      case 'general':
-      default:
-        // Regular item, no enrichment needed
-        return {
-          ...item,
-          collector_category: null
-        };
+    const { getEnrichmentType } = require('../utils/tagMatcher');
+    
+    // Check tags first (new tag-based system)
+    const tags = item.tags || [];
+    const enrichmentType = getEnrichmentType(tags);
+    
+    console.log(`[Collector] Processing item: ${item.name} (tags: ${tags.join(', ') || 'none'})`);
+    
+    // Route based on tags
+    if (enrichmentType === 'wine') {
+      console.log(`[Collector] Detected wine via tags, enriching with Vivino`);
+      return await enrichWineItem(item);
     }
+    
+    if (enrichmentType === 'vinyl') {
+      console.log(`[Collector] Detected vinyl via tags, enriching with Discogs`);
+      return await enrichVinylItem(item);
+    }
+    
+    // Fallback: check old item_type for backwards compatibility
+    if (item.item_type === 'wine') {
+      console.log(`[Collector] Detected wine via item_type (legacy), enriching with Vivino`);
+      return await enrichWineItem(item);
+    }
+    
+    if (item.item_type === 'vinyl') {
+      console.log(`[Collector] Detected vinyl via item_type (legacy), enriching with Discogs`);
+      return await enrichVinylItem(item);
+    }
+    
+    // Item has custom tags but no enrichment available
+    if (tags.length > 0) {
+      console.log(`[Collector] Item has tags but no enrichment available: ${tags.join(', ')}`);
+      return {
+        ...item,
+        collector_category: null
+      };
+    }
+    
+    // Regular item, no enrichment needed
+    return {
+      ...item,
+      collector_category: null
+    };
 
   } catch (error) {
     console.error('[Collector] Error processing item:', error.message);

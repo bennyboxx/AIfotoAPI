@@ -231,14 +231,24 @@ const compressImage = async (base64Image, maxWidth = 1024, maxHeight = 1024) => 
  * Process image with OpenAI Vision API
  * @param {string} base64Image - Base64 encoded image
  * @param {string} language - Language for the output (default: 'en' for English)
+ * @param {Array<string>} userTags - Optional array of user tags for classification
  * @returns {Object} OpenAI response with detected items and token usage
  */
-const processImageWithOpenAI = async (base64Image, language = 'en') => {
+const processImageWithOpenAI = async (base64Image, language = 'en', userTags = []) => {
   // Compress image to reduce token usage
   const compressedImage = await compressImage(base64Image, 1024, 1024);
   
   // Get image dimensions
   const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
+  
+  // Merge user tags with system tags
+  const { mergeTagsWithSystem } = require('./utils/tagMatcher');
+  const allTags = mergeTagsWithSystem(userTags);
+  
+  // Create tags instruction for AI
+  const tagsInstruction = allTags.length > 0
+    ? `\n- Available tags: ${allTags.join(', ')}\n- Assign relevant tags to each item using semantic matching (e.g., "bottle" → "wine", "LP" → "vinyl")\n- Add assigned tags to the "tags" array field`
+    : '';
   
   // Determine language instruction
   let languageInstruction = '';
@@ -264,7 +274,7 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
           content: [
             {
               type: "input_text",
-              text: `You are an expert in visually analyzing household scenes, with special attention to collectible items. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"item_type\": \"wine\" or \"vinyl\" or \"general\",\n      \"collector_details\": {\n        \"winery\": \"Château Name\" or null,\n        \"vintage\": 2015 or null,\n        \"wine_name\": \"Full wine name\" or null,\n        \"artist\": \"Artist Name\" or null,\n        \"album\": \"Album Title\" or null,\n        \"release_year\": 1973 or null\n      }\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
+              text: `You are an expert in visually analyzing household scenes, with special attention to collectible items. Return ONLY a JSON object with an 'items' array. For each clearly visible and identifiable household item, include:\n\n{\n  \"items\": [\n    {\n      \"name\": \"Item name\",\n      \"description\": \"Brief description\",\n      \"estimated_value\": 25.50,\n      \"quantity\": 1,\n      \"accuracy\": 0.95,\n      \"item_type\": \"wine\" or \"vinyl\" or \"general\",\n      \"tags\": [\"relevant\", \"tags\", \"here\"],\n      \"collector_details\": {\n        \"winery\": \"Château Name\" or null,\n        \"vintage\": 2015 or null,\n        \"wine_name\": \"Full wine name\" or null,\n        \"artist\": \"Artist Name\" or null,\n        \"album\": \"Album Title\" or null,\n        \"release_year\": 1973 or null\n      }\n    }\n  ]\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'items' (no prose).\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0\n- Do NOT include any bounding boxes or coordinates.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- tags: Array of relevant tags assigned to this item${tagsInstruction}\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`
             },
             {
               type: "input_image",
@@ -291,6 +301,7 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
                     "quantity",
                     "accuracy",
                     "item_type",
+                    "tags",
                     "collector_details"
                   ],
                   properties: {
@@ -300,6 +311,10 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
                     quantity: { type: "integer", minimum: 1 },
                     accuracy: { type: "number", minimum: 0, maximum: 1 },
                     item_type: { type: "string", enum: ["wine", "vinyl", "general"] },
+                    tags: {
+                      type: "array",
+                      items: { type: "string" }
+                    },
                     collector_details: {
                       type: "object",
                       properties: {
@@ -461,14 +476,24 @@ const processImageWithOpenAI = async (base64Image, language = 'en') => {
  * @param {string} base64Image - Base64 encoded image
  * @param {string|null} itemDescription - Optional description of the item to focus on
  * @param {string} language - Language for the output (default: 'en' for English)
+ * @param {Array<string>} userTags - Optional array of user tags for classification
  * @returns {Object} OpenAI response with single item details and token usage
  */
-const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, language = 'en') => {
+const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, language = 'en', userTags = []) => {
   // Compress image to reduce token usage
   const compressedImage = await compressImage(base64Image, 1024, 1024);
   
   // Get image dimensions
   const { width: imageWidth, height: imageHeight } = getImageDimensions(compressedImage);
+  
+  // Merge user tags with system tags
+  const { mergeTagsWithSystem } = require('./utils/tagMatcher');
+  const allTags = mergeTagsWithSystem(userTags);
+  
+  // Create tags instruction for AI
+  const tagsInstruction = allTags.length > 0
+    ? `\n- Available tags: ${allTags.join(', ')}\n- Assign relevant tags to this item using semantic matching (e.g., "bottle" → "wine", "LP" → "vinyl")\n- Add assigned tags to the "tags" array field`
+    : '';
   
   // Determine language instruction
   let languageInstruction = '';
@@ -488,9 +513,9 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
   // Create prompt based on whether item description is provided
   let promptText;
   if (itemDescription) {
-    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "collector_details": {\n      "winery": "Château Name" or null,\n      "vintage": 2015 or null,\n      "wine_name": "Full wine name" or null,\n      "artist": "Artist Name" or null,\n      "album": "Album Title" or null,\n      "release_year": 1973 or null\n    }\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Focus ONLY on this item: "${itemDescription}". Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "tags": [\"relevant\", \"tags\"],\n    "collector_details": {\n      "winery": "Château Name" or null,\n      "vintage": 2015 or null,\n      "wine_name": "Full wine name" or null,\n      "artist": "Artist Name" or null,\n      "album": "Album Title" or null,\n      "release_year": 1973 or null\n    }\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Focus exclusively on "${itemDescription}".\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- If the item is not found or unclear, set accuracy to 0 and provide best estimate.\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- tags: Array of relevant tags assigned to this item${tagsInstruction}\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   } else {
-    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "collector_details": {\n      "winery": "Château Name" or null,\n      "vintage": 2015 or null,\n      "wine_name": "Full wine name" or null,\n      "artist": "Artist Name" or null,\n      "album": "Album Title" or null,\n      "release_year": 1973 or null\n    }\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
+    promptText = `You are an expert in visually analyzing household items, with special attention to collectible items. Identify and analyze the MOST PROMINENT or VALUABLE item in this image. Return ONLY a JSON object with a single 'item' object:\n\n{\n  "item": {\n    "name": "Item name",\n    "description": "Detailed description including: condition (Good/Excellent/Fair/Poor), brand (if visible), model (if identifiable), and any other relevant details",\n    "estimated_value": 25.50,\n    "quantity": 1,\n    "accuracy": 0.95,\n    "item_type": "wine" or "vinyl" or "general",\n    "tags": [\"relevant\", \"tags\"],\n    "collector_details": {\n      "winery": "Château Name" or null,\n      "vintage": 2015 or null,\n      "wine_name": "Full wine name" or null,\n      "artist": "Artist Name" or null,\n      "album": "Album Title" or null,\n      "release_year": 1973 or null\n    }\n  }\n}\n\nStrict rules:\n- Output must be ONLY a JSON object with key 'item' (no prose).\n- Choose the most prominent, valuable, or significant item in the image.\n- Prices in euros as numbers (no currency symbol).\n- accuracy: 0.0–1.0 (confidence in identification).\n- Include ALL details (condition, brand, model, materials, etc.) in the description field.\n- Make the description comprehensive and detailed.\n- item_type: Use "wine" for wine bottles, "vinyl" for vinyl records/LPs, "general" for other items.\n- tags: Array of relevant tags assigned to this item${tagsInstruction}\n- collector_details: ALWAYS include this object.\n  - For WINE: set winery, vintage, wine_name (set others to null)\n  - For VINYL: set artist, album, release_year (set others to null)\n  - For GENERAL: set ALL fields to null${languageInstruction}\n\nAnalyze this image (dimensions: ${imageWidth}x${imageHeight} pixels) and return the JSON object.`;
   }
   
   try {
@@ -527,6 +552,7 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
                   "quantity",
                   "accuracy",
                   "item_type",
+                  "tags",
                   "collector_details"
                 ],
                 properties: {
@@ -536,6 +562,10 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
                   quantity: { type: "integer", minimum: 1 },
                   accuracy: { type: "number", minimum: 0, maximum: 1 },
                   item_type: { type: "string", enum: ["wine", "vinyl", "general"] },
+                  tags: {
+                    type: "array",
+                    items: { type: "string" }
+                  },
                   collector_details: {
                     type: "object",
                     properties: {
@@ -668,7 +698,7 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { image_url, user_id, language } = req.body;
+    const { image_url, user_id, language, tags } = req.body;
     
     // Validate input
     if (!image_url || !user_id) {
@@ -685,13 +715,18 @@ app.post('/process', verifyFirebaseToken, async (req, res) => {
     }
 
     const requestedLanguage = language || 'en';
+    const userTags = Array.isArray(tags) ? tags : [];
+    
     console.log(`Processing image for user ${user_id} in language: ${requestedLanguage}`);
+    if (userTags.length > 0) {
+      console.log(`[Tags] User provided ${userTags.length} tags:`, userTags);
+    }
 
     // Download and encode image
     const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
     
     // Process with OpenAI Vision
-    const result = await processImageWithOpenAI(base64Image, requestedLanguage);
+    const result = await processImageWithOpenAI(base64Image, requestedLanguage, userTags);
     
     // Enrich collector items with external API data
     const enrichedItems = await processCollectorItems(result.items);
@@ -737,9 +772,9 @@ app.post('/process-single', verifyFirebaseToken, async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { image_url, user_id, item_name, language } = req.body;
+    const { image_url, user_id, item_name, language, tags } = req.body;
     
-    // Validate input - item_name and language are optional
+    // Validate input - item_name, language, and tags are optional
     if (!image_url || !user_id) {
       return res.status(400).json({ 
         error: 'Missing required fields: image_url and user_id are required' 
@@ -754,17 +789,23 @@ app.post('/process-single', verifyFirebaseToken, async (req, res) => {
     }
 
     const requestedLanguage = language || 'en';
+    const userTags = Array.isArray(tags) ? tags : [];
+    
     if (item_name) {
       console.log(`Processing single item "${item_name}" for user ${user_id} in language: ${requestedLanguage}`);
     } else {
       console.log(`Processing most prominent item for user ${user_id} in language: ${requestedLanguage}`);
+    }
+    
+    if (userTags.length > 0) {
+      console.log(`[Tags] User provided ${userTags.length} tags:`, userTags);
     }
 
     // Download and encode image
     const { base64: base64Image, filePath } = await downloadAndEncodeImage(image_url);
     
     // Process with OpenAI Vision - single item focus
-    const result = await processSingleItemWithOpenAI(base64Image, item_name, requestedLanguage);
+    const result = await processSingleItemWithOpenAI(base64Image, item_name, requestedLanguage, userTags);
     
     // Enrich collector item with external API data
     const enrichedItem = await processCollectorItem(result.item);

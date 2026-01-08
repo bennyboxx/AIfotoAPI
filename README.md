@@ -76,7 +76,8 @@ Content-Type: application/json
 {
   "image_url": "https://firebasestorage.googleapis.com/...",
   "user_id": "firebase_user_uid",
-  "language": "nl"  // OPTIONEEL - Taalcode voor output (standaard: 'en')
+  "language": "nl",  // OPTIONEEL - Taalcode voor output (standaard: 'en')
+  "tags": ["LEGO", "speelgoed", "vintage"]  // OPTIONEEL - User tags voor classificatie
 }
 ```
 
@@ -154,7 +155,62 @@ Content-Type: application/json
 }
 ```
 
-**Note:** De output taal kan worden gespecificeerd via de `language` parameter. Zonder deze parameter wordt Engels gebruikt.
+**Note:** 
+- De output taal kan worden gespecificeerd via de `language` parameter. Zonder deze parameter wordt Engels gebruikt.
+- De `tags` parameter is optioneel en bevat een array van user tags die de AI gebruikt voor item classificatie.
+
+## 🏷️ Tag-Based Classification System
+
+De API ondersteunt een flexibel tag-based systeem waarbij gebruikers custom tags kunnen meegeven voor item classificatie.
+
+### Hoe het werkt
+
+1. **User Tags**: De Flutter app haalt tags op uit Firestore en stuurt deze mee in de request
+2. **System Tags**: De API heeft hardcoded tags voor enrichment (`wine`, `vinyl`)
+3. **AI Matching**: OpenAI krijgt alle tags en matched ze semantisch met items
+4. **Enrichment**: Items met `wine` of `vinyl` tags krijgen externe API data
+
+### Voorbeeld Request met Tags
+
+```json
+POST /process
+{
+  "image_url": "...",
+  "user_id": "abc123",
+  "language": "nl",
+  "tags": ["LEGO", "Star Wars", "speelgoed", "vintage"]
+}
+```
+
+### Voorbeeld Response met Tags
+
+```json
+{
+  "items": [
+    {
+      "name": "LEGO Millennium Falcon",
+      "tags": ["LEGO", "Star Wars", "speelgoed"],
+      "collector_category": null,
+      "collector_data": null
+    },
+    {
+      "name": "Pink Floyd - Dark Side of the Moon",
+      "tags": ["vinyl", "rock", "classic"],
+      "collector_category": "vinyl",
+      "collector_data": { /* Discogs data */ }
+    }
+  ]
+}
+```
+
+### Systeem Tags (met API Enrichment)
+
+| Tag | Aliases | Enrichment API | Data |
+|-----|---------|----------------|------|
+| **wine** | wijn, vin, vino, wein | Vivino | Rating, reviews, region, pairing |
+| **vinyl** | plaat, LP, record, album | Discogs | Artist, year, label, pricing |
+
+**Custom tags** (zoals LEGO, speelgoed, vintage) worden assigned door de AI maar hebben (nog) geen API enrichment.
 
 ## 🎯 Collector Features
 
@@ -235,7 +291,8 @@ Content-Type: application/json
   "image_url": "https://firebasestorage.googleapis.com/...",
   "user_id": "firebase_user_uid",
   "item_name": "laptop",  // OPTIONEEL - als niet gegeven, wordt meest prominente item geanalyseerd
-  "language": "nl"  // OPTIONEEL - Taalcode voor output (standaard: 'en')
+  "language": "nl",  // OPTIONEEL - Taalcode voor output (standaard: 'en')
+  "tags": ["electronics", "Apple", "laptop"]  // OPTIONEEL - User tags voor classificatie
 }
 ```
 
@@ -332,8 +389,11 @@ De API gebruikt Firebase Authentication. Elke request naar `/process` of `/proce
 
 **Flutter voorbeelden:**
 
-### Alle items detecteren
+### Alle items detecteren (met tags)
 ```dart
+// Haal user tags op uit Firestore
+final userTags = await getUserTagsFromFirestore(userId);
+
 final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
 final response = await http.post(
   Uri.parse('https://your-api.com/process'),
@@ -345,6 +405,7 @@ final response = await http.post(
     'image_url': imageUrl,
     'user_id': FirebaseAuth.instance.currentUser?.uid,
     'language': 'nl', // Optioneel - voor Nederlandse output
+    'tags': userTags, // Optioneel - user tags voor classificatie
   }),
 );
 ```
