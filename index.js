@@ -245,6 +245,10 @@ const processImageWithOpenAI = async (base64Image, language = 'en', userTags = [
   const { mergeTagsWithSystem } = require('./utils/tagMatcher');
   const allTags = mergeTagsWithSystem(userTags);
   
+  // Log tags info
+  console.log('[Tags] User provided:', userTags.length, 'tags -', userTags.join(', ') || 'none');
+  console.log('[Tags] Merged with system:', allTags.length, 'tags -', allTags.join(', '));
+  
   // Create tags instruction for AI
   const tagsInstruction = allTags.length > 0
     ? `\n- Available tags: ${allTags.join(', ')}\n- Assign relevant tags to each item using semantic matching (e.g., "bottle" → "wine", "LP" → "vinyl")\n- Add assigned tags to the "tags" array field`
@@ -375,7 +379,6 @@ const processImageWithOpenAI = async (base64Image, language = 'en', userTags = [
     // }
 
     const content = response.output_text || "";
-    console.log('OpenAI response content:', content);
     
     // Clean possible code fences to improve JSON parsing robustness
     const contentClean = content
@@ -383,6 +386,9 @@ const processImageWithOpenAI = async (base64Image, language = 'en', userTags = [
       .replace(/^```\s*/i, '')
       .replace(/\s*```\s*$/i, '')
       .trim();
+    
+    console.log('[OpenAI] Response length:', contentClean.length, 'characters');
+    console.log('[OpenAI] First 200 chars:', contentClean.substring(0, 200));
     
     // Extract token usage information (Responses API: input_tokens/output_tokens)
     const tokenUsage = response.usage || {};
@@ -414,6 +420,8 @@ const processImageWithOpenAI = async (base64Image, language = 'en', userTags = [
         const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
         const items = rawItems;
         
+        console.log(`[OpenAI] Successfully parsed JSON with ${items.length} items`);
+        
         return {
           items: items,
           token_usage: {
@@ -428,16 +436,20 @@ const processImageWithOpenAI = async (base64Image, language = 'en', userTags = [
           warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
         };
       } catch (parseError) {
-        console.error('JSON parse error for extracted array:', parseError);
-        throw new Error('Invalid JSON format in OpenAI response');
+        console.error('[OpenAI] JSON parse error for extracted JSON:', parseError.message);
+        console.error('[OpenAI] Attempted to parse:', jsonMatch[0].substring(0, 500));
+        throw new Error(`Invalid JSON format in OpenAI response: ${parseError.message}`);
       }
     }
     
-    // If no JSON array found, try to parse the entire response
+    // If no JSON found with regex, try to parse the entire response
     try {
       const parsed = JSON.parse(contentClean);
       const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
       const items = rawItems;
+      
+      console.log(`[OpenAI] Successfully parsed full content with ${items.length} items`);
+      
       return {
         items: items,
         token_usage: {
@@ -450,9 +462,10 @@ const processImageWithOpenAI = async (base64Image, language = 'en', userTags = [
         warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
       };
     } catch (parseError) {
-      console.error('JSON parse error for full content:', parseError);
-      console.error('Raw content:', contentClean);
-      throw new Error('OpenAI response is not valid JSON');
+      console.error('[OpenAI] JSON parse error for full content:', parseError.message);
+      console.error('[OpenAI] Full raw content (first 1000 chars):', contentClean.substring(0, 1000));
+      console.error('[OpenAI] Content ends with:', contentClean.substring(contentClean.length - 100));
+      throw new Error(`OpenAI response is not valid JSON: ${parseError.message}. Response preview: ${contentClean.substring(0, 200)}`);
     }
   } catch (error) {
     console.error('OpenAI API error:', error);
@@ -489,6 +502,10 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
   // Merge user tags with system tags
   const { mergeTagsWithSystem } = require('./utils/tagMatcher');
   const allTags = mergeTagsWithSystem(userTags);
+  
+  // Log tags info
+  console.log('[Tags Single] User provided:', userTags.length, 'tags -', userTags.join(', ') || 'none');
+  console.log('[Tags Single] Merged with system:', allTags.length, 'tags -', allTags.join(', '));
   
   // Create tags instruction for AI
   const tagsInstruction = allTags.length > 0
@@ -593,7 +610,6 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
     });
 
     const content = response.output_text || "";
-    console.log('OpenAI response content:', content);
     
     // Clean possible code fences
     const contentClean = content
@@ -601,6 +617,9 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
       .replace(/^```\s*/i, '')
       .replace(/\s*```\s*$/i, '')
       .trim();
+    
+    console.log('[OpenAI Single] Response length:', contentClean.length, 'characters');
+    console.log('[OpenAI Single] First 200 chars:', contentClean.substring(0, 200));
     
     // Extract token usage information
     const tokenUsage = response.usage || {};
@@ -633,6 +652,8 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
           throw new Error('Response missing "item" field');
         }
         
+        console.log('[OpenAI Single] Successfully parsed JSON');
+        
         return {
           item: parsed.item,
           token_usage: {
@@ -645,8 +666,9 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
           warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
         };
       } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        throw new Error('Invalid JSON format in OpenAI response');
+        console.error('[OpenAI Single] JSON parse error:', parseError.message);
+        console.error('[OpenAI Single] Attempted to parse:', jsonMatch[0].substring(0, 500));
+        throw new Error(`Invalid JSON format in OpenAI response: ${parseError.message}`);
       }
     }
     
@@ -656,6 +678,8 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
       if (!parsed.item) {
         throw new Error('Response missing "item" field');
       }
+      
+      console.log('[OpenAI Single] Successfully parsed full content');
       
       return {
         item: parsed.item,
@@ -669,9 +693,10 @@ const processSingleItemWithOpenAI = async (base64Image, itemDescription = null, 
         warnings: totalTokens > 15000 ? [`High token usage: ${totalTokens} tokens. Consider using smaller images to reduce costs.`] : []
       };
     } catch (parseError) {
-      console.error('JSON parse error for full content:', parseError);
-      console.error('Raw content:', contentClean);
-      throw new Error('OpenAI response is not valid JSON');
+      console.error('[OpenAI Single] JSON parse error for full content:', parseError.message);
+      console.error('[OpenAI Single] Full raw content (first 1000 chars):', contentClean.substring(0, 1000));
+      console.error('[OpenAI Single] Content ends with:', contentClean.substring(contentClean.length - 100));
+      throw new Error(`OpenAI response is not valid JSON: ${parseError.message}. Response preview: ${contentClean.substring(0, 200)}`);
     }
   } catch (error) {
     console.error('OpenAI API error:', error);
