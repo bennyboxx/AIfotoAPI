@@ -34,16 +34,18 @@ async function searchVinyl(artist, album, releaseYear = null) {
       return null;
     }
 
-    // Build search query
+    // Build search query - try strict format first
     let searchQuery = `artist:"${artist}" release_title:"${album}"`;
     if (releaseYear) {
       searchQuery += ` year:${releaseYear}`;
     }
     
     console.log(`[Discogs] Searching for: ${artist} - ${album}`);
+    console.log(`[Discogs] Search query (strict): "${searchQuery}"`);
     
     // Build URL with Consumer Key and Secret for authentication
     const url = `${DISCOGS_API_BASE}/database/search?q=${encodeURIComponent(searchQuery)}&type=release&format=vinyl&key=${consumerKey}&secret=${consumerSecret}`;
+    console.log(`[Discogs] Full URL: ${url.replace(consumerKey, 'KEY').replace(consumerSecret, 'SECRET')}`);
     
     const response = await fetch(url, {
       method: 'GET',
@@ -54,6 +56,8 @@ async function searchVinyl(artist, album, releaseYear = null) {
       timeout: 5000 // 5 second timeout
     });
 
+    console.log(`[Discogs] Response status: ${response.status}`);
+
     if (!response.ok) {
       console.error(`[Discogs] API error: ${response.status} ${response.statusText}`);
       
@@ -62,19 +66,66 @@ async function searchVinyl(artist, album, releaseYear = null) {
         console.error('[Discogs] Rate limit exceeded');
       }
       
+      // Try to log error body
+      try {
+        const errorBody = await response.text();
+        console.error(`[Discogs] Error body: ${errorBody}`);
+      } catch (e) {
+        // Ignore
+      }
+      
       return null;
     }
 
     const data = await response.json();
     
-    // Check if we have results
+    console.log(`[Discogs] Found ${data.results?.length || 0} results (strict search)`);
+    
+    // If no results with strict search, try a simpler search
     if (!data.results || data.results.length === 0) {
-      console.log('[Discogs] No results found');
+      console.log('[Discogs] No results with strict search, trying simple search...');
+      
+      // Simple search: just artist and album name
+      const simpleQuery = `${artist} ${album}`;
+      const simpleUrl = `${DISCOGS_API_BASE}/database/search?q=${encodeURIComponent(simpleQuery)}&type=release&format=vinyl&key=${consumerKey}&secret=${consumerSecret}`;
+      
+      console.log(`[Discogs] Simple query: "${simpleQuery}"`);
+      
+      const simpleResponse = await fetch(simpleUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept': 'application/json',
+        },
+        timeout: 5000
+      });
+      
+      if (simpleResponse.ok) {
+        const simpleData = await simpleResponse.json();
+        console.log(`[Discogs] Found ${simpleData.results?.length || 0} results (simple search)`);
+        
+        if (simpleData.results && simpleData.results.length > 0) {
+          // Use simple search results
+          const topResult = simpleData.results[0];
+          console.log(`[Discogs] Top result: ${topResult.title} (ID: ${topResult.id})`);
+          
+          const detailedData = await getDetailedRelease(topResult.id, consumerKey, consumerSecret);
+          
+          if (!detailedData) {
+            return formatSearchResult(topResult);
+          }
+          
+          return detailedData;
+        }
+      }
+      
+      console.log('[Discogs] No results found even with simple search');
       return null;
     }
 
     // Get the first (best) match
     const topResult = data.results[0];
+    console.log(`[Discogs] Top result: ${topResult.title} (ID: ${topResult.id})`);
 
     // Get detailed information about the release
     const detailedData = await getDetailedRelease(topResult.id, consumerKey, consumerSecret);
@@ -300,6 +351,7 @@ async function enrichVinylItem(item) {
     }
 
     const { artist, album, release_year } = item.collector_details;
+    console.log(`[Discogs] Enriching vinyl: Artist="${artist}", Album="${album}", Year=${release_year}`);
     
     // Search Discogs
     const discogsData = await searchVinyl(artist, album, release_year);
