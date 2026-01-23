@@ -83,15 +83,23 @@ const findItemsByName = async (admin, itemName, limit = 10) => {
     return exactSnap.docs.map((doc) => ({ id: doc.id, data: doc.data() }));
   }
 
-  const prefixSnap = await db
-    .collectionGroup('items')
-    .orderBy('name')
-    .startAt(trimmedName)
-    .endAt(`${trimmedName}\uf8ff`)
-    .limit(limit)
-    .get();
+  try {
+    const prefixSnap = await db
+      .collectionGroup('items')
+      .orderBy('name')
+      .startAt(trimmedName)
+      .endAt(`${trimmedName}\uf8ff`)
+      .limit(limit)
+      .get();
 
-  return prefixSnap.docs.map((doc) => ({ id: doc.id, data: doc.data() }));
+    return prefixSnap.docs.map((doc) => ({ id: doc.id, data: doc.data() }));
+  } catch (error) {
+    if (error?.code === 9) {
+      console.warn('Assistant prefix search failed (missing index). Skipping prefix lookup.');
+      return [];
+    }
+    throw error;
+  }
 };
 
 /**
