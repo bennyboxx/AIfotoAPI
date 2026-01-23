@@ -8,6 +8,7 @@ require('dotenv').config();
 
 // Import collector services
 const { processCollectorItems, processCollectorItem, getCollectorStats } = require('./services/collectorService');
+const { registerAssistantWebhook } = require('./services/assistantWebhook');
 
 // Initialize Express app
 const app = express();
@@ -73,6 +74,9 @@ const verifyFirebaseToken = async (req, res, next) => {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 };
+
+// Register Assistant webhook
+registerAssistantWebhook(app, admin);
 
 /**
  * Extract file path from Firebase Storage URL
@@ -890,6 +894,7 @@ app.get('/', (req, res) => {
     message: 'Track My Home API',
     version: API_VERSION,
     endpoints: {
+      'POST /assistant/webhook': 'Google Assistant Actions Builder webhook',
       'POST /process': 'Process image and detect all household items',
       'POST /process-single': 'Process image and analyze a specific item',
       'GET /health': 'Health check',
