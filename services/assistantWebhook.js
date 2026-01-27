@@ -50,14 +50,14 @@ const assistantTemplates = {
     missing_item: () => 'Welke item zoek je?',
     found: (name, location) => `Je ${name} ligt in ${location}.`,
     not_found: (name) => `Ik heb geen ${name} gevonden.`,
-    multiple_matches: (name, list) => `Ik heb meerdere matches voor ${name}: ${list}.`,
+    multiple_matches: (name, count, list) => `Ik heb ${count} matches voor ${name}: ${list}.`,
     no_access: () => 'Ik heb geen toegang tot je items.'
   },
   en: {
     missing_item: () => 'Which item are you looking for?',
     found: (name, location) => `Your ${name} is in ${location}.`,
     not_found: (name) => `I could not find ${name}.`,
-    multiple_matches: (name, list) => `I found multiple matches for ${name}: ${list}.`,
+    multiple_matches: (name, count, list) => `I found ${count} matches for ${name}: ${list}.`,
     no_access: () => 'I do not have access to your items.'
   }
 };
@@ -197,7 +197,7 @@ const registerAssistantWebhook = (app, admin) => {
         .map((match) => `${match.name} (${match.location})`)
         .join(', ');
 
-      return res.json(buildAssistantResponse(templates.multiple_matches(itemName, list)));
+      return res.json(buildAssistantResponse(templates.multiple_matches(itemName, accessible.length, list)));
     } catch (error) {
       console.error('Assistant webhook error:', error);
       const fallback = locale === 'nl' ? 'Er ging iets mis.' : 'Something went wrong.';
