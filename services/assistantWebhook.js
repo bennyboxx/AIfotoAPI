@@ -43,6 +43,22 @@ const buildAssistantResponse = (speech) => ({
 });
 
 /**
+ * Build Dialogflow ES webhook response
+ * @param {string} speech - Response text
+ * @returns {Object} Dialogflow webhook response
+ */
+const buildDialogflowResponse = (speech) => ({
+  fulfillmentText: speech,
+  fulfillmentMessages: [
+    {
+      text: {
+        text: [speech]
+      }
+    }
+  ]
+});
+
+/**
  * Assistant response templates (NL/EN)
  */
 const assistantTemplates = {
@@ -130,25 +146,29 @@ const registerAssistantWebhook = (app, admin) => {
   app.post('/assistant/webhook', async (req, res) => {
     const locale = getAssistantLocale(req.body);
     const templates = assistantTemplates[locale];
+    const isDialogflow = Boolean(req.body?.queryResult);
+    const respond = (speech) =>
+      res.json(isDialogflow ? buildDialogflowResponse(speech) : buildAssistantResponse(speech));
 
     try {
       const itemName =
         req.body?.intent?.params?.itemName?.resolved ||
         req.body?.intent?.params?.itemName?.original ||
-        req.body?.intent?.params?.itemName?.value;
+        req.body?.intent?.params?.itemName?.value ||
+        req.body?.queryResult?.parameters?.itemName;
 
       if (!itemName || typeof itemName !== 'string') {
-        return res.json(buildAssistantResponse(templates.missing_item()));
+        return respond(templates.missing_item());
       }
 
       const decodedToken = await verifyAssistantAccessToken(req, admin);
       if (!decodedToken?.uid) {
-        return res.json(buildAssistantResponse(templates.no_access()));
+        return respond(templates.no_access());
       }
 
       const matches = await findItemsByName(admin, itemName, 10);
       if (matches.length === 0) {
-        return res.json(buildAssistantResponse(templates.not_found(itemName)));
+        return respond(templates.not_found(itemName));
       }
 
       const parentIds = Array.from(
@@ -184,12 +204,12 @@ const registerAssistantWebhook = (app, admin) => {
 
       const accessible = enriched.filter((match) => match.hasAccess);
       if (accessible.length === 0) {
-        return res.json(buildAssistantResponse(templates.no_access()));
+        return respond(templates.no_access());
       }
 
       if (accessible.length === 1) {
         const match = accessible[0];
-        return res.json(buildAssistantResponse(templates.found(match.name, match.location)));
+        return respond(templates.found(match.name, match.location));
       }
 
       const list = accessible
@@ -197,11 +217,11 @@ const registerAssistantWebhook = (app, admin) => {
         .map((match) => `${match.name} (${match.location})`)
         .join(', ');
 
-      return res.json(buildAssistantResponse(templates.multiple_matches(itemName, accessible.length, list)));
+      return respond(templates.multiple_matches(itemName, accessible.length, list));
     } catch (error) {
       console.error('Assistant webhook error:', error);
       const fallback = locale === 'nl' ? 'Er ging iets mis.' : 'Something went wrong.';
-      return res.status(500).json(buildAssistantResponse(fallback));
+      return res.status(500).json(isDialogflow ? buildDialogflowResponse(fallback) : buildAssistantResponse(fallback));
     }
   });
 };
