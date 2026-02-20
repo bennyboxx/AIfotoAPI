@@ -292,7 +292,8 @@ Content-Type: application/json
   "user_id": "firebase_user_uid",
   "item_name": "laptop",  // OPTIONEEL - als niet gegeven, wordt meest prominente item geanalyseerd
   "language": "nl",  // OPTIONEEL - Taalcode voor output (standaard: 'en')
-  "tags": ["electronics", "Apple", "laptop"]  // OPTIONEEL - User tags voor classificatie
+  "tags": ["electronics", "Apple", "laptop"],  // OPTIONEEL - User tags voor classificatie
+  "tips": "Apple logo zichtbaar, zilveren laptop, mogelijk MacBook"  // OPTIONEEL - hints voor herkenning
 }
 ```
 
@@ -424,6 +425,7 @@ final response = await http.post(
     'user_id': FirebaseAuth.instance.currentUser?.uid,
     'item_name': 'laptop', // Optioneel
     'language': 'nl', // Optioneel - voor Nederlandse output
+    'tips': 'Apple logo zichtbaar, zilveren laptop, mogelijk MacBook', // Optioneel - hints
   }),
 );
 ```
