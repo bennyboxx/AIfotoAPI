@@ -333,6 +333,149 @@ function formatFormats(formats) {
 }
 
 /**
+ * Search for vinyl by catalog number (much more precise than artist+album)
+ * @param {string} catalogNumber - Catalog number from the record label
+ * @param {string} artist - Optional artist to narrow results
+ * @returns {Promise<Object|null>} Vinyl data or null
+ */
+async function searchVinylByCatalogNumber(catalogNumber, artist = null) {
+  try {
+    const consumerKey = process.env.DISCOGS_API_KEY;
+    const consumerSecret = process.env.DISCOGS_API_SECRET;
+
+    if (!consumerKey || !consumerSecret) {
+      console.warn('[Discogs] Consumer Key/Secret not configured');
+      return null;
+    }
+
+    console.log(`[Discogs] Searching by catalog number: ${catalogNumber}`);
+
+    let url = `${DISCOGS_API_BASE}/database/search?catno=${encodeURIComponent(catalogNumber)}&type=release&key=${consumerKey}&secret=${consumerSecret}`;
+    if (artist) {
+      url += `&artist=${encodeURIComponent(artist)}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
+      timeout: 5000
+    });
+
+    if (!response.ok) {
+      console.error(`[Discogs] Catalog search error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log(`[Discogs] Catalog search found ${data.results?.length || 0} results`);
+
+    if (!data.results || data.results.length === 0) return null;
+
+    const topResult = data.results[0];
+    console.log(`[Discogs] Catalog match: ${topResult.title} (ID: ${topResult.id})`);
+
+    const detailedData = await getDetailedRelease(topResult.id, consumerKey, consumerSecret);
+    return detailedData || formatSearchResult(topResult);
+
+  } catch (error) {
+    console.error('[Discogs] Catalog search error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Search for vinyl by barcode
+ * @param {string} barcode - Barcode from the record sleeve
+ * @returns {Promise<Object|null>} Vinyl data or null
+ */
+async function searchVinylByBarcode(barcode) {
+  try {
+    const consumerKey = process.env.DISCOGS_API_KEY;
+    const consumerSecret = process.env.DISCOGS_API_SECRET;
+
+    if (!consumerKey || !consumerSecret) {
+      console.warn('[Discogs] Consumer Key/Secret not configured');
+      return null;
+    }
+
+    console.log(`[Discogs] Searching by barcode: ${barcode}`);
+
+    const url = `${DISCOGS_API_BASE}/database/search?barcode=${encodeURIComponent(barcode)}&type=release&key=${consumerKey}&secret=${consumerSecret}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
+      timeout: 5000
+    });
+
+    if (!response.ok) {
+      console.error(`[Discogs] Barcode search error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log(`[Discogs] Barcode search found ${data.results?.length || 0} results`);
+
+    if (!data.results || data.results.length === 0) return null;
+
+    const topResult = data.results[0];
+    console.log(`[Discogs] Barcode match: ${topResult.title} (ID: ${topResult.id})`);
+
+    const detailedData = await getDetailedRelease(topResult.id, consumerKey, consumerSecret);
+    return detailedData || formatSearchResult(topResult);
+
+  } catch (error) {
+    console.error('[Discogs] Barcode search error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Enrich vinyl using extra info from user follow-up (catalog number, barcode, etc.)
+ * @param {Object} collectorDetails - Original collector_details from AI
+ * @param {Object} extraInfo - User-provided extra info (catalog_number, barcode, etc.)
+ * @returns {Promise<Object>} Enriched collector data
+ */
+async function enrichVinylWithExtraInfo(collectorDetails, extraInfo) {
+  try {
+    let discogsData = null;
+
+    if (extraInfo.catalog_number) {
+      discogsData = await searchVinylByCatalogNumber(
+        extraInfo.catalog_number,
+        collectorDetails?.artist || null
+      );
+    }
+
+    if (!discogsData && extraInfo.barcode) {
+      discogsData = await searchVinylByBarcode(extraInfo.barcode);
+    }
+
+    if (!discogsData && collectorDetails?.artist) {
+      discogsData = await searchVinyl(
+        collectorDetails.artist,
+        collectorDetails.album,
+        collectorDetails.release_year
+      );
+    }
+
+    return {
+      collector_category: 'vinyl',
+      collector_data: discogsData,
+      collector_warning: discogsData ? undefined : 'Vinyl not found on Discogs even with extra info'
+    };
+
+  } catch (error) {
+    console.error('[Discogs] Extra info enrichment error:', error.message);
+    return {
+      collector_category: 'vinyl',
+      collector_data: null,
+      collector_warning: `Discogs API error: ${error.message}`
+    };
+  }
+}
+
+/**
  * Enrich vinyl item with Discogs data
  * @param {Object} item - Item from OpenAI with vinyl_details
  * @returns {Promise<Object>} Enriched item with collector_data
@@ -386,7 +529,10 @@ async function enrichVinylItem(item) {
 
 module.exports = {
   searchVinyl,
+  searchVinylByCatalogNumber,
+  searchVinylByBarcode,
   enrichVinylItem,
+  enrichVinylWithExtraInfo,
   getDetailedRelease
 };
 

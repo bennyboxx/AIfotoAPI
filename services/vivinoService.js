@@ -144,6 +144,43 @@ function getWineType(typeId) {
 }
 
 /**
+ * Enrich wine using extra info from user follow-up (barcode, vintage, region, etc.)
+ * @param {Object} collectorDetails - Original collector_details from AI
+ * @param {Object} extraInfo - User-provided extra info (barcode, vintage_year, etc.)
+ * @returns {Promise<Object>} Enriched collector data
+ */
+async function enrichWineWithExtraInfo(collectorDetails, extraInfo) {
+  try {
+    const parts = [];
+    if (collectorDetails?.wine_name) parts.push(collectorDetails.wine_name);
+    else if (collectorDetails?.winery) parts.push(collectorDetails.winery);
+
+    if (extraInfo.barcode) parts.push(extraInfo.barcode);
+
+    const vintage = extraInfo.vintage_year || collectorDetails?.vintage || null;
+    const query = parts.join(' ') || 'wine';
+
+    console.log(`[Vivino] Enriching with extra info - query: "${query}", vintage: ${vintage}`);
+
+    const vivinoData = await searchWine(query, vintage);
+
+    return {
+      collector_category: 'wine',
+      collector_data: vivinoData,
+      collector_warning: vivinoData ? undefined : 'Wine not found on Vivino even with extra info'
+    };
+
+  } catch (error) {
+    console.error('[Vivino] Extra info enrichment error:', error.message);
+    return {
+      collector_category: 'wine',
+      collector_data: null,
+      collector_warning: `Vivino API error: ${error.message}`
+    };
+  }
+}
+
+/**
  * Enrich wine item with Vivino data
  * @param {Object} item - Item from OpenAI with wine_details
  * @returns {Promise<Object>} Enriched item with collector_data
@@ -197,6 +234,7 @@ async function enrichWineItem(item) {
 
 module.exports = {
   searchWine,
-  enrichWineItem
+  enrichWineItem,
+  enrichWineWithExtraInfo
 };
 
