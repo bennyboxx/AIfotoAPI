@@ -1,240 +1,171 @@
 /**
- * Vivino API Service
- * 
- * Note: Vivino doesn't have an official public API, so we use their internal API
- * which may change without notice. This is a best-effort implementation.
+ * Wine Enrichment Service
+ *
+ * Enriches wine items with a lightweight text-only GPT-4o call.
+ * Only invoked when a wine tag/item_type is detected (~5% of requests),
+ * keeping the main vision prompt small and cheap for non-wine items.
  */
 
-const VIVINO_SEARCH_URL = 'https://www.vivino.com/api/wines/search';
-const VIVINO_BASE_URL = 'https://www.vivino.com';
+const OpenAI = require('openai');
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const VIVINO_SEARCH_BASE = 'https://www.vivino.com/search/wines';
 
 /**
- * Search for wine on Vivino
- * @param {string} query - Search query (wine name, winery, etc.)
- * @param {number} vintage - Optional vintage year
- * @returns {Promise<Object|null>} Wine data or null if not found
+ * Build a Vivino search URL from wine name and optional vintage
+ * @param {string|null} wineName
+ * @param {number|null} vintage
+ * @returns {string|null}
  */
-async function searchWine(query, vintage = null) {
+function buildVivinoSearchUrl(wineName, vintage) {
+  if (!wineName) return null;
+  const query = vintage ? `${wineName} ${vintage}` : wineName;
+  return `${VIVINO_SEARCH_BASE}?q=${encodeURIComponent(query)}`;
+}
+
+/**
+ * Call GPT-4o (text-only, no image) to get rich wine details.
+ * @param {string} wineName
+ * @param {string|null} winery
+ * @param {number|null} vintage
+ * @returns {Promise<Object|null>} Wine enrichment data
+ */
+async function fetchWineDetails(wineName, winery, vintage) {
+  const wineQuery = [wineName, winery, vintage].filter(Boolean).join(', ');
+
+  console.log(`[Wine] Fetching details via text-only GPT-4o for: ${wineQuery}`);
+
   try {
-    // Build search query
-    const searchQuery = vintage ? `${query} ${vintage}` : query;
-    
-    console.log(`[Vivino] Searching for: ${searchQuery}`);
-    
-    // Vivino's internal API endpoint
-    const url = `https://www.vivino.com/api/wines/search?q=${encodeURIComponent(searchQuery)}&language=en`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
+    const response = await openai.responses.create({
+      model: 'gpt-4o-mini',
+      input: [
+        {
+          role: 'user',
+          content: `You are a wine expert. Given the following wine, return detailed information as JSON.\n\nWine: ${wineQuery}\n\nReturn ONLY a JSON object (no prose) with these fields:\n- grape_variety (string): primary grape varieties, e.g. "Cabernet Sauvignon, Merlot"\n- region (string): wine region, e.g. "Margaux, Bordeaux"\n- country (string): country of origin\n- wine_type (string): one of "Red wine", "White wine", "Rosé wine", "Sparkling wine", "Dessert wine", "Fortified wine"\n- food_pairing (array of strings): 3-5 food pairing suggestions\n- estimated_rating (number): estimated Vivino-style rating 0.0-5.0 based on your knowledge, or null if unknown`
+        }
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'wine_details',
+          schema: {
+            type: 'object',
+            properties: {
+              grape_variety: { type: ['string', 'null'] },
+              region: { type: ['string', 'null'] },
+              country: { type: ['string', 'null'] },
+              wine_type: { type: ['string', 'null'] },
+              food_pairing: { type: 'array', items: { type: 'string' } },
+              estimated_rating: { type: ['number', 'null'] }
+            },
+            required: ['grape_variety', 'region', 'country', 'wine_type', 'food_pairing', 'estimated_rating'],
+            additionalProperties: false
+          },
+          strict: true
+        }
       },
-      timeout: 5000 // 5 second timeout
+      max_output_tokens: 500
     });
 
-    if (!response.ok) {
-      console.error(`[Vivino] API error: ${response.status} ${response.statusText}`);
-      return null;
-    }
+    const content = (response.output_text || '').trim();
+    const parsed = JSON.parse(content);
 
-    const data = await response.json();
-    
-    // Check if we have results
-    if (!data.explore_vintage?.records || data.explore_vintage.records.length === 0) {
-      console.log('[Vivino] No results found');
-      return null;
-    }
+    const usage = response.usage || {};
+    const totalTokens = usage.total_tokens || ((usage.input_tokens || 0) + (usage.output_tokens || 0));
+    console.log(`[Wine] GPT-4o-mini enrichment used ${totalTokens} tokens`);
 
-    // Get the first (best) match
-    const topResult = data.explore_vintage.records[0];
-    const wine = topResult.vintage?.wine;
-    const vintageData = topResult.vintage;
-
-    if (!wine) {
-      console.log('[Vivino] Invalid result structure');
-      return null;
-    }
-
-    // Extract wine data
-    const wineData = {
-      vivino_url: `${VIVINO_BASE_URL}/wines/${wine.id}`,
-      vivino_rating: wine.statistics?.ratings_average || 0,
-      vivino_reviews_count: wine.statistics?.ratings_count || 0,
-      winery: wine.winery?.name || 'Unknown',
-      vintage: vintageData?.year || vintage || null,
-      grape_variety: wine.style?.varietal_name || wine.style?.description || 'Unknown',
-      region: formatRegion(wine.region),
-      country: wine.region?.country?.name || 'Unknown',
-      food_pairing: extractFoodPairing(wine),
-      wine_type: wine.type_id ? getWineType(wine.type_id) : 'Unknown',
-      image_url: wine.image?.location || null,
-      price_estimate: vintageData?.price?.amount || null,
-      price_currency: vintageData?.price?.currency?.code || 'EUR'
-    };
-
-    console.log(`[Vivino] Found wine: ${wineData.winery} - ${wine.name} (${wineData.vintage})`);
-    console.log(`[Vivino] Rating: ${wineData.vivino_rating}/5 (${wineData.vivino_reviews_count} reviews)`);
-
-    return wineData;
-
+    return parsed;
   } catch (error) {
-    console.error('[Vivino] Search error:', error.message);
+    console.error('[Wine] Text enrichment failed:', error.message);
     return null;
   }
 }
 
 /**
- * Format region information
- * @param {Object} region - Vivino region object
- * @returns {string} Formatted region string
- */
-function formatRegion(region) {
-  if (!region) return 'Unknown';
-  
-  const parts = [];
-  if (region.name) parts.push(region.name);
-  if (region.area?.name) parts.push(region.area.name);
-  if (region.country?.name) parts.push(region.country.name);
-  
-  return parts.join(', ') || 'Unknown';
-}
-
-/**
- * Extract food pairing suggestions
- * @param {Object} wine - Wine object
- * @returns {Array<string>} Food pairing suggestions
- */
-function extractFoodPairing(wine) {
-  const defaultPairings = ['Red meat', 'Cheese', 'Pasta'];
-  
-  // Vivino doesn't always provide food pairing in search results
-  // We can make educated guesses based on wine type
-  if (wine.type_id === 1) { // Red wine
-    return ['Red meat', 'Game', 'Mature cheese', 'Pasta with red sauce'];
-  } else if (wine.type_id === 2) { // White wine
-    return ['Fish', 'Seafood', 'Poultry', 'Soft cheese'];
-  } else if (wine.type_id === 3) { // Sparkling
-    return ['Appetizers', 'Seafood', 'Celebration dishes'];
-  } else if (wine.type_id === 4) { // Rosé
-    return ['Salads', 'Light pasta', 'Grilled vegetables', 'Mediterranean dishes'];
-  } else if (wine.type_id === 24) { // Dessert wine
-    return ['Desserts', 'Foie gras', 'Blue cheese'];
-  }
-  
-  return defaultPairings;
-}
-
-/**
- * Get wine type name from type ID
- * @param {number} typeId - Wine type ID
- * @returns {string} Wine type name
- */
-function getWineType(typeId) {
-  const types = {
-    1: 'Red wine',
-    2: 'White wine',
-    3: 'Sparkling wine',
-    4: 'Rosé wine',
-    7: 'Dessert wine',
-    24: 'Fortified wine'
-  };
-  
-  return types[typeId] || 'Wine';
-}
-
-/**
- * Enrich wine using extra info from user follow-up (barcode, vintage, region, etc.)
- * @param {Object} collectorDetails - Original collector_details from AI
- * @param {Object} extraInfo - User-provided extra info (barcode, vintage_year, etc.)
- * @returns {Promise<Object>} Enriched collector data
- */
-async function enrichWineWithExtraInfo(collectorDetails, extraInfo) {
-  try {
-    const parts = [];
-    if (collectorDetails?.wine_name) parts.push(collectorDetails.wine_name);
-    else if (collectorDetails?.winery) parts.push(collectorDetails.winery);
-
-    if (extraInfo.barcode) parts.push(extraInfo.barcode);
-
-    const vintage = extraInfo.vintage_year || collectorDetails?.vintage || null;
-    const query = parts.join(' ') || 'wine';
-
-    console.log(`[Vivino] Enriching with extra info - query: "${query}", vintage: ${vintage}`);
-
-    const vivinoData = await searchWine(query, vintage);
-
-    return {
-      collector_category: 'wine',
-      collector_data: vivinoData,
-      collector_warning: vivinoData ? undefined : 'Wine not found on Vivino even with extra info'
-    };
-
-  } catch (error) {
-    console.error('[Vivino] Extra info enrichment error:', error.message);
-    return {
-      collector_category: 'wine',
-      collector_data: null,
-      collector_warning: `Vivino API error: ${error.message}`
-    };
-  }
-}
-
-/**
- * Enrich wine item with Vivino data
- * @param {Object} item - Item from OpenAI with wine_details
+ * Enrich a wine item with a separate text-only GPT-4o call.
+ * @param {Object} item - Item from OpenAI response (with collector_details)
  * @returns {Promise<Object>} Enriched item with collector_data
  */
 async function enrichWineItem(item) {
-  try {
-    // Check if we have wine details from OpenAI (now in collector_details)
-    if (!item.collector_details || !item.collector_details.wine_name) {
-      console.log('[Vivino] No wine details provided, skipping enrichment');
-      return {
-        ...item,
-        collector_category: 'wine',
-        collector_data: null,
-        collector_warning: 'Insufficient wine details for enrichment'
-      };
-    }
-
-    const { wine_name, winery, vintage } = item.collector_details;
-    
-    // Search Vivino
-    const searchQuery = wine_name || `${winery}`;
-    const vivinoData = await searchWine(searchQuery, vintage);
-
-    if (!vivinoData) {
-      console.log('[Vivino] No Vivino data found for wine');
-      return {
-        ...item,
-        collector_category: 'wine',
-        collector_data: null,
-        collector_warning: 'Wine not found on Vivino'
-      };
-    }
-
-    // Merge OpenAI data with Vivino data
-    return {
-      ...item,
-      collector_category: 'wine',
-      collector_data: vivinoData
-    };
-
-  } catch (error) {
-    console.error('[Vivino] Enrichment error:', error.message);
+  if (!item.collector_details || !item.collector_details.wine_name) {
+    console.log('[Wine] No wine details provided, skipping enrichment');
     return {
       ...item,
       collector_category: 'wine',
       collector_data: null,
-      collector_warning: `Vivino API error: ${error.message}`
+      collector_warning: 'Insufficient wine details for enrichment'
     };
   }
+
+  const { wine_name, winery, vintage } = item.collector_details;
+  const details = await fetchWineDetails(wine_name, winery, vintage);
+
+  const collectorData = {
+    winery: winery || null,
+    vintage: vintage || null,
+    wine_name: wine_name || null,
+    grape_variety: details?.grape_variety || null,
+    region: details?.region || null,
+    country: details?.country || null,
+    wine_type: details?.wine_type || null,
+    food_pairing: Array.isArray(details?.food_pairing) ? details.food_pairing : [],
+    estimated_rating: details?.estimated_rating || null,
+    vivino_search_url: buildVivinoSearchUrl(wine_name, vintage)
+  };
+
+  console.log(`[Wine] Enriched: ${collectorData.winery} - ${collectorData.wine_name} (${collectorData.vintage})`);
+
+  return {
+    ...item,
+    collector_category: 'wine',
+    collector_data: collectorData
+  };
+}
+
+/**
+ * Re-enrich wine with extra info supplied by the user (barcode, vintage, etc.)
+ * @param {Object} collectorDetails - Original collector_details from AI
+ * @param {Object} extraInfo - User-provided extra info
+ * @returns {Promise<Object>} { collector_category, collector_data, collector_warning? }
+ */
+async function enrichWineWithExtraInfo(collectorDetails, extraInfo) {
+  const wineName = collectorDetails?.wine_name || collectorDetails?.winery || null;
+  const winery = collectorDetails?.winery || null;
+  const vintage = extraInfo.vintage_year || collectorDetails?.vintage || null;
+
+  if (!wineName) {
+    return {
+      collector_category: 'wine',
+      collector_data: null,
+      collector_warning: 'No wine name available for enrichment'
+    };
+  }
+
+  const details = await fetchWineDetails(wineName, winery, vintage);
+
+  const collectorData = {
+    winery: winery,
+    vintage: vintage,
+    wine_name: wineName,
+    grape_variety: details?.grape_variety || null,
+    region: details?.region || null,
+    country: details?.country || null,
+    wine_type: details?.wine_type || null,
+    food_pairing: Array.isArray(details?.food_pairing) ? details.food_pairing : [],
+    estimated_rating: details?.estimated_rating || null,
+    vivino_search_url: buildVivinoSearchUrl(wineName, vintage)
+  };
+
+  console.log(`[Wine] Re-enriched with extra info: ${collectorData.wine_name} (${collectorData.vintage})`);
+
+  return {
+    collector_category: 'wine',
+    collector_data: collectorData
+  };
 }
 
 module.exports = {
-  searchWine,
   enrichWineItem,
   enrichWineWithExtraInfo
 };
-

@@ -24,7 +24,7 @@ async function processCollectorItem(item) {
     
     // Route based on tags
     if (enrichmentType === 'wine') {
-      console.log(`[Collector] Detected wine via tags, enriching with Vivino`);
+      console.log(`[Collector] Detected wine via tags, enriching with wine data`);
       return await enrichWineItem(item);
     }
     
@@ -35,7 +35,7 @@ async function processCollectorItem(item) {
     
     // Fallback: check old item_type for backwards compatibility
     if (item.item_type === 'wine') {
-      console.log(`[Collector] Detected wine via item_type (legacy), enriching with Vivino`);
+      console.log(`[Collector] Detected wine via item_type (legacy), enriching with wine data`);
       return await enrichWineItem(item);
     }
     
