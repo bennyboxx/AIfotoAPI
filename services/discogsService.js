@@ -476,28 +476,52 @@ async function enrichVinylWithExtraInfo(collectorDetails, extraInfo) {
 }
 
 /**
- * Enrich vinyl item with Discogs data
+ * Enrich vinyl item with Discogs data.
+ * Falls back to Google Cloud Vision WEB_DETECTION when GPT-4o could not
+ * identify the artist/album from the cover image.
  * @param {Object} item - Item from OpenAI with vinyl_details
  * @returns {Promise<Object>} Enriched item with collector_data
  */
 async function enrichVinylItem(item) {
   try {
-    // Check if we have vinyl details from OpenAI (now in collector_details)
-    if (!item.collector_details || !item.collector_details.artist) {
-      console.log('[Discogs] No vinyl details provided, skipping enrichment');
+    let artist = item.collector_details?.artist || null;
+    let album = item.collector_details?.album || null;
+    let releaseYear = item.collector_details?.release_year || null;
+    let visionUsed = false;
+
+    // If GPT-4o could not identify the vinyl, try Google Vision as fallback
+    if ((!artist || !album) && item._base64Image) {
+      console.log('[Discogs] GPT-4o did not identify vinyl — trying Google Vision fallback...');
+      const { identifyVinylFromImage } = require('./googleVisionService');
+      const visionResult = await identifyVinylFromImage(item._base64Image);
+
+      if (visionResult) {
+        artist = artist || visionResult.artist;
+        album = album || visionResult.album;
+        releaseYear = releaseYear || visionResult.release_year;
+        visionUsed = true;
+        console.log(`[Discogs] Vision fallback found: ${artist} - ${album}`);
+      }
+    }
+
+    if (!artist && !album) {
+      console.log('[Discogs] No vinyl details from GPT-4o or Vision, skipping enrichment');
+
+      const fallbackQuestions = buildVinylFallbackQuestions(item);
+
       return {
         ...item,
         collector_category: 'vinyl',
         collector_data: null,
-        collector_warning: 'Insufficient vinyl details for enrichment'
+        collector_warning: 'Could not identify vinyl from image (GPT-4o and Vision both failed)',
+        followup_questions: fallbackQuestions,
+        _base64Image: undefined
       };
     }
 
-    const { artist, album, release_year } = item.collector_details;
-    console.log(`[Discogs] Enriching vinyl: Artist="${artist}", Album="${album}", Year=${release_year}`);
+    console.log(`[Discogs] Enriching vinyl: Artist="${artist}", Album="${album}", Year=${releaseYear}${visionUsed ? ' (via Vision fallback)' : ''}`);
     
-    // Search Discogs
-    const discogsData = await searchVinyl(artist, album, release_year);
+    const discogsData = await searchVinyl(artist, album, releaseYear);
 
     if (!discogsData) {
       console.log('[Discogs] No Discogs data found for vinyl');
@@ -505,15 +529,18 @@ async function enrichVinylItem(item) {
         ...item,
         collector_category: 'vinyl',
         collector_data: null,
-        collector_warning: 'Vinyl not found on Discogs'
+        collector_warning: 'Vinyl not found on Discogs',
+        vision_fallback_used: visionUsed,
+        _base64Image: undefined
       };
     }
 
-    // Merge OpenAI data with Discogs data
     return {
       ...item,
       collector_category: 'vinyl',
-      collector_data: discogsData
+      collector_data: discogsData,
+      vision_fallback_used: visionUsed,
+      _base64Image: undefined
     };
 
   } catch (error) {
@@ -522,9 +549,41 @@ async function enrichVinylItem(item) {
       ...item,
       collector_category: 'vinyl',
       collector_data: null,
-      collector_warning: `Discogs API error: ${error.message}`
+      collector_warning: `Discogs API error: ${error.message}`,
+      _base64Image: undefined
     };
   }
+}
+
+/**
+ * Build fallback followup questions when vinyl could not be identified.
+ * Merges with any existing followup_questions on the item.
+ * @param {Object} item - The item being processed
+ * @returns {Array} Array of followup question objects
+ */
+function buildVinylFallbackQuestions(item) {
+  const existing = item.followup_questions || [];
+  const existingFields = new Set(existing.map(q => q.field));
+
+  const fallback = [];
+
+  if (!existingFields.has('catalog_number')) {
+    fallback.push({
+      field: 'catalog_number',
+      question: 'What is the catalog number on the record label or spine? (e.g. CBS 85224)',
+      priority: 'high'
+    });
+  }
+
+  if (!existingFields.has('barcode')) {
+    fallback.push({
+      field: 'barcode',
+      question: 'Is there a barcode on the sleeve? Please enter the number below it.',
+      priority: 'high'
+    });
+  }
+
+  return [...existing, ...fallback];
 }
 
 module.exports = {

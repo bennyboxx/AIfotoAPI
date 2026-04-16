@@ -145,13 +145,7 @@ function getCollectorStats(items) {
  * @returns {Object} Cleaned item for API response
  */
 function cleanItemForResponse(item) {
-  // Remove the raw OpenAI wine_details and vinyl_details
-  // since we now have collector_data
-  const cleanedItem = { ...item };
-  
-  // Keep wine_details and vinyl_details for reference, but they're optional
-  // The main enriched data is in collector_data
-  
+  const { _base64Image, ...cleanedItem } = item;
   return cleanedItem;
 }
 
