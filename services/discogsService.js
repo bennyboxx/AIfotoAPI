@@ -546,8 +546,9 @@ async function enrichVinylItem(item) {
         console.log(`[Discogs] Using direct release lookup for ID ${discogsReleaseIdFromVision}`);
         const directData = await getDetailedRelease(discogsReleaseIdFromVision, consumerKey, consumerSecret);
         if (directData) {
+          const enrichedItem = applyCollectorDataToItem(item, directData);
           return {
-            ...item,
+            ...enrichedItem,
             collector_category: 'vinyl',
             collector_data: directData,
             identification_source: 'vision_direct_release',
@@ -592,8 +593,9 @@ async function enrichVinylItem(item) {
       };
     }
 
+    const enrichedItem = applyCollectorDataToItem(item, discogsData);
     return {
-      ...item,
+      ...enrichedItem,
       collector_category: 'vinyl',
       collector_data: discogsData,
       identification_source: source,
@@ -610,6 +612,64 @@ async function enrichVinylItem(item) {
       _base64Image: undefined
     };
   }
+}
+
+/**
+ * Apply Discogs collector_data to the top-level item fields so the frontend
+ * can display "Linkin Park - From Zero" instead of the generic "Vinyl Record".
+ *
+ * - name               => "${artist} - ${album}"
+ * - collector_details  => filled with artist/album/release_year from Discogs
+ * - tags               => original tags + genres + styles (deduped, lowercased)
+ * - estimated_value    => overridden with Discogs avg price when available
+ *
+ * The AI-generated `description` is kept (it describes the physical condition
+ * of this specific copy, which is complementary to the release metadata).
+ *
+ * @param {Object} item - Item from OpenAI
+ * @param {Object} discogsData - Enriched Discogs collector_data
+ * @returns {Object} Item with top-level fields overwritten by Discogs info
+ */
+function applyCollectorDataToItem(item, discogsData) {
+  if (!discogsData) return item;
+
+  const artist = discogsData.artist && discogsData.artist !== 'Unknown' ? discogsData.artist : null;
+  const album = discogsData.album && discogsData.album !== 'Unknown' ? discogsData.album : null;
+
+  let name = item.name;
+  if (artist && album) {
+    name = `${artist} - ${album}`;
+  } else if (album) {
+    name = album;
+  } else if (artist) {
+    name = artist;
+  }
+
+  const collectorDetails = {
+    ...(item.collector_details || {}),
+    artist: artist,
+    album: album,
+    release_year: discogsData.release_year || null
+  };
+
+  const baseTags = Array.isArray(item.tags) ? item.tags : [];
+  const extraTags = [
+    ...(Array.isArray(discogsData.genres) ? discogsData.genres : []),
+    ...(Array.isArray(discogsData.styles) ? discogsData.styles : [])
+  ].map(t => String(t).toLowerCase());
+  const tags = Array.from(new Set([...baseTags, ...extraTags]));
+
+  const estimatedValue = typeof discogsData.discogs_avg_price === 'number' && discogsData.discogs_avg_price > 0
+    ? Math.round(discogsData.discogs_avg_price)
+    : item.estimated_value;
+
+  return {
+    ...item,
+    name,
+    collector_details: collectorDetails,
+    tags,
+    estimated_value: estimatedValue
+  };
 }
 
 /**
@@ -649,7 +709,8 @@ module.exports = {
   searchVinylByBarcode,
   enrichVinylItem,
   enrichVinylWithExtraInfo,
-  getDetailedRelease
+  getDetailedRelease,
+  applyCollectorDataToItem
 };
 
 
