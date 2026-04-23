@@ -15,7 +15,7 @@ const { registerAssistantWebhook } = require('./services/assistantWebhook');
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_VERSION = '1.0.5';
+const API_VERSION = '1.1.0';
 
 // Initialize OpenAI
 const openai = new OpenAI({
