@@ -492,27 +492,45 @@ async function enrichVinylWithExtraInfo(collectorDetails, extraInfo) {
  * @param {Object} item - Item from OpenAI with vinyl_details
  * @returns {Promise<Object>} Enriched item with collector_data
  */
+// Minimum accuracy required to trust GPT-4o's vinyl identification.
+// Below this threshold, we skip GPT-4o's guess and go straight to Vision fallback.
+const GPT_ACCURACY_THRESHOLD = 0.7;
+
 async function enrichVinylItem(item) {
   try {
-    let artist = item.collector_details?.artist || null;
-    let album = item.collector_details?.album || null;
-    let releaseYear = item.collector_details?.release_year || null;
+    const gptAccuracy = typeof item.accuracy === 'number' ? item.accuracy : 1;
+    const gptArtist = item.collector_details?.artist || null;
+    const gptAlbum = item.collector_details?.album || null;
+    const gptYear = item.collector_details?.release_year || null;
+
+    // Only trust GPT-4o when BOTH artist and album are present AND accuracy is high enough
+    const trustGpt = gptArtist && gptAlbum && gptAccuracy >= GPT_ACCURACY_THRESHOLD;
+
+    let artist = trustGpt ? gptArtist : null;
+    let album = trustGpt ? gptAlbum : null;
+    let releaseYear = trustGpt ? gptYear : null;
     let visionUsed = false;
     let discogsReleaseIdFromVision = null;
 
-    // If GPT-4o could not identify the vinyl, try Google Vision as fallback
-    if ((!artist || !album) && item._base64Image) {
-      console.log('[Discogs] GPT-4o did not identify vinyl — trying Google Vision fallback...');
-      const { identifyVinylFromImage } = require('./googleVisionService');
-      const visionResult = await identifyVinylFromImage(item._base64Image);
+    if (!trustGpt) {
+      if (gptArtist || gptAlbum) {
+        console.log(`[Discogs] GPT-4o guess (${gptArtist} - ${gptAlbum}, accuracy ${gptAccuracy}) below threshold ${GPT_ACCURACY_THRESHOLD} — ignoring and using Vision fallback`);
+      } else {
+        console.log('[Discogs] GPT-4o did not identify vinyl — trying Google Vision fallback...');
+      }
 
-      if (visionResult) {
-        artist = artist || visionResult.artist;
-        album = album || visionResult.album;
-        releaseYear = releaseYear || visionResult.release_year;
-        discogsReleaseIdFromVision = visionResult.discogs_release_id || null;
-        visionUsed = true;
-        console.log(`[Discogs] Vision fallback found: ${artist} - ${album}${discogsReleaseIdFromVision ? ` [direct release ID: ${discogsReleaseIdFromVision}]` : ''}`);
+      if (item._base64Image) {
+        const { identifyVinylFromImage } = require('./googleVisionService');
+        const visionResult = await identifyVinylFromImage(item._base64Image);
+
+        if (visionResult) {
+          artist = visionResult.artist;
+          album = visionResult.album;
+          releaseYear = visionResult.release_year;
+          discogsReleaseIdFromVision = visionResult.discogs_release_id || null;
+          visionUsed = true;
+          console.log(`[Discogs] Vision fallback found: ${artist} - ${album}${discogsReleaseIdFromVision ? ` [direct release ID: ${discogsReleaseIdFromVision}]` : ''}`);
+        }
       }
     }
 
