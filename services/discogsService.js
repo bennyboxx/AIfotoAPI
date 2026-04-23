@@ -499,9 +499,18 @@ async function enrichVinylWithExtraInfo(collectorDetails, extraInfo) {
  */
 async function enrichVinylItem(item) {
   try {
-    const gptArtist = item.collector_details?.artist || null;
-    const gptAlbum = item.collector_details?.album || null;
-    const gptYear = item.collector_details?.release_year || null;
+    // DEFENSIVE: ignore GPT-4o's vinyl guesses — they're unreliable and cause hallucinations.
+    // Vision handles all vinyl identification. GPT-4o only classifies + describes condition.
+    if (item.collector_details) {
+      if (item.collector_details.artist || item.collector_details.album || item.collector_details.release_year) {
+        console.log(`[Discogs] Ignoring GPT-4o vinyl guess (${item.collector_details.artist} - ${item.collector_details.album}) — Vision handles identification`);
+      }
+      item.collector_details.artist = null;
+      item.collector_details.album = null;
+      item.collector_details.release_year = null;
+    }
+    // Strip any followup questions GPT-4o added for vinyl — we only use ours
+    item.followup_questions = [];
 
     let artist = null;
     let album = null;
@@ -548,18 +557,9 @@ async function enrichVinylItem(item) {
       }
     }
 
-    // --- FALLBACK: GPT-4o's guess (last resort, less reliable) ---
-    if (!artist && !album && gptArtist && gptAlbum) {
-      console.log(`[Discogs] Vision failed — falling back to GPT-4o guess: ${gptArtist} - ${gptAlbum}`);
-      artist = gptArtist;
-      album = gptAlbum;
-      releaseYear = gptYear;
-      source = 'gpt_fallback';
-    }
-
-    // --- BOTH FAILED: ask the user ---
+    // --- VISION FAILED: ask the user for catalog number / barcode ---
     if (!artist && !album) {
-      console.log('[Discogs] Neither Vision nor GPT-4o identified the vinyl');
+      console.log('[Discogs] Vision could not identify the vinyl — asking user for catalog number / barcode');
 
       const fallbackQuestions = buildVinylFallbackQuestions(item);
 
