@@ -16,6 +16,16 @@ const DISCOGS_API_BASE = 'https://api.discogs.com';
 const USER_AGENT = 'TrackMyHomeAPI/1.0 +https://trackmyhome.app';
 
 /**
+ * Build a valid Discogs URL from a uri returned by the API.
+ * The Discogs API sometimes returns a full URL and sometimes a relative path.
+ */
+function buildDiscogsUrl(uri) {
+  if (!uri) return null;
+  if (uri.startsWith('http://') || uri.startsWith('https://')) return uri;
+  return `https://www.discogs.com${uri.startsWith('/') ? '' : '/'}${uri}`;
+}
+
+/**
  * Search for vinyl/record on Discogs
  * @param {string} artist - Artist name
  * @param {string} album - Album title
@@ -174,7 +184,7 @@ async function getDetailedRelease(releaseId, consumerKey, consumerSecret) {
     const pricing = await getReleasePricing(releaseId, consumerKey, consumerSecret);
 
     const vinylData = {
-      discogs_url: data.uri ? `https://www.discogs.com${data.uri}` : null,
+      discogs_url: buildDiscogsUrl(data.uri),
       discogs_id: data.id,
       artist: formatArtists(data.artists),
       album: data.title,
@@ -262,7 +272,7 @@ async function getReleasePricing(releaseId, consumerKey, consumerSecret) {
  */
 function formatSearchResult(result) {
   return {
-    discogs_url: result.uri ? `https://www.discogs.com${result.uri}` : null,
+    discogs_url: buildDiscogsUrl(result.uri),
     discogs_id: result.id,
     artist: result.title?.split(' - ')?.[0] || 'Unknown',
     album: result.title?.split(' - ')?.[1] || result.title || 'Unknown',
@@ -488,6 +498,7 @@ async function enrichVinylItem(item) {
     let album = item.collector_details?.album || null;
     let releaseYear = item.collector_details?.release_year || null;
     let visionUsed = false;
+    let discogsReleaseIdFromVision = null;
 
     // If GPT-4o could not identify the vinyl, try Google Vision as fallback
     if ((!artist || !album) && item._base64Image) {
@@ -499,8 +510,28 @@ async function enrichVinylItem(item) {
         artist = artist || visionResult.artist;
         album = album || visionResult.album;
         releaseYear = releaseYear || visionResult.release_year;
+        discogsReleaseIdFromVision = visionResult.discogs_release_id || null;
         visionUsed = true;
-        console.log(`[Discogs] Vision fallback found: ${artist} - ${album}`);
+        console.log(`[Discogs] Vision fallback found: ${artist} - ${album}${discogsReleaseIdFromVision ? ` [direct release ID: ${discogsReleaseIdFromVision}]` : ''}`);
+      }
+    }
+
+    // Fast path: if Vision gave us a direct Discogs release URL, use it
+    if (discogsReleaseIdFromVision) {
+      const consumerKey = process.env.DISCOGS_API_KEY;
+      const consumerSecret = process.env.DISCOGS_API_SECRET;
+      if (consumerKey && consumerSecret) {
+        console.log(`[Discogs] Using direct release lookup for ID ${discogsReleaseIdFromVision}`);
+        const directData = await getDetailedRelease(discogsReleaseIdFromVision, consumerKey, consumerSecret);
+        if (directData) {
+          return {
+            ...item,
+            collector_category: 'vinyl',
+            collector_data: directData,
+            vision_fallback_used: true,
+            _base64Image: undefined
+          };
+        }
       }
     }
 
