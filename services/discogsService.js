@@ -487,54 +487,49 @@ async function enrichVinylWithExtraInfo(collectorDetails, extraInfo) {
 
 /**
  * Enrich vinyl item with Discogs data.
- * Falls back to Google Cloud Vision WEB_DETECTION when GPT-4o could not
- * identify the artist/album from the cover image.
- * @param {Object} item - Item from OpenAI with vinyl_details
+ *
+ * Strategy: Vision-first.
+ * Google Cloud Vision WEB_DETECTION does a reverse image search on the
+ * actual internet and is more reliable than GPT-4o for album identification
+ * (GPT-4o often hallucinates with high confidence). We use GPT-4o's
+ * artist/album guess only as a last-resort fallback when Vision fails.
+ *
+ * @param {Object} item - Item from OpenAI (with collector_details and _base64Image)
  * @returns {Promise<Object>} Enriched item with collector_data
  */
-// Minimum accuracy required to trust GPT-4o's vinyl identification.
-// Below this threshold, we skip GPT-4o's guess and go straight to Vision fallback.
-const GPT_ACCURACY_THRESHOLD = 0.7;
-
 async function enrichVinylItem(item) {
   try {
-    const gptAccuracy = typeof item.accuracy === 'number' ? item.accuracy : 1;
     const gptArtist = item.collector_details?.artist || null;
     const gptAlbum = item.collector_details?.album || null;
     const gptYear = item.collector_details?.release_year || null;
 
-    // Only trust GPT-4o when BOTH artist and album are present AND accuracy is high enough
-    const trustGpt = gptArtist && gptAlbum && gptAccuracy >= GPT_ACCURACY_THRESHOLD;
-
-    let artist = trustGpt ? gptArtist : null;
-    let album = trustGpt ? gptAlbum : null;
-    let releaseYear = trustGpt ? gptYear : null;
-    let visionUsed = false;
+    let artist = null;
+    let album = null;
+    let releaseYear = null;
+    let source = null;
     let discogsReleaseIdFromVision = null;
 
-    if (!trustGpt) {
-      if (gptArtist || gptAlbum) {
-        console.log(`[Discogs] GPT-4o guess (${gptArtist} - ${gptAlbum}, accuracy ${gptAccuracy}) below threshold ${GPT_ACCURACY_THRESHOLD} — ignoring and using Vision fallback`);
+    // --- PRIMARY: Google Vision WEB_DETECTION (reverse image search) ---
+    if (item._base64Image) {
+      console.log('[Discogs] Vinyl detected — running Google Vision WEB_DETECTION as primary identifier...');
+      const { identifyVinylFromImage } = require('./googleVisionService');
+      const visionResult = await identifyVinylFromImage(item._base64Image);
+
+      if (visionResult && (visionResult.artist || visionResult.album)) {
+        artist = visionResult.artist;
+        album = visionResult.album;
+        releaseYear = visionResult.release_year;
+        discogsReleaseIdFromVision = visionResult.discogs_release_id || null;
+        source = 'vision';
+        console.log(`[Discogs] Vision identified: ${artist} - ${album}${discogsReleaseIdFromVision ? ` [direct release ID: ${discogsReleaseIdFromVision}]` : ''}`);
       } else {
-        console.log('[Discogs] GPT-4o did not identify vinyl — trying Google Vision fallback...');
+        console.log('[Discogs] Vision could not identify the vinyl');
       }
-
-      if (item._base64Image) {
-        const { identifyVinylFromImage } = require('./googleVisionService');
-        const visionResult = await identifyVinylFromImage(item._base64Image);
-
-        if (visionResult) {
-          artist = visionResult.artist;
-          album = visionResult.album;
-          releaseYear = visionResult.release_year;
-          discogsReleaseIdFromVision = visionResult.discogs_release_id || null;
-          visionUsed = true;
-          console.log(`[Discogs] Vision fallback found: ${artist} - ${album}${discogsReleaseIdFromVision ? ` [direct release ID: ${discogsReleaseIdFromVision}]` : ''}`);
-        }
-      }
+    } else {
+      console.log('[Discogs] No image available for Vision — skipping primary identification');
     }
 
-    // Fast path: if Vision gave us a direct Discogs release URL, use it
+    // --- FAST PATH: direct Discogs release lookup via Vision's matching pages ---
     if (discogsReleaseIdFromVision) {
       const consumerKey = process.env.DISCOGS_API_KEY;
       const consumerSecret = process.env.DISCOGS_API_SECRET;
@@ -546,15 +541,25 @@ async function enrichVinylItem(item) {
             ...item,
             collector_category: 'vinyl',
             collector_data: directData,
-            vision_fallback_used: true,
+            identification_source: 'vision_direct_release',
             _base64Image: undefined
           };
         }
       }
     }
 
+    // --- FALLBACK: GPT-4o's guess (last resort, less reliable) ---
+    if (!artist && !album && gptArtist && gptAlbum) {
+      console.log(`[Discogs] Vision failed — falling back to GPT-4o guess: ${gptArtist} - ${gptAlbum}`);
+      artist = gptArtist;
+      album = gptAlbum;
+      releaseYear = gptYear;
+      source = 'gpt_fallback';
+    }
+
+    // --- BOTH FAILED: ask the user ---
     if (!artist && !album) {
-      console.log('[Discogs] No vinyl details from GPT-4o or Vision, skipping enrichment');
+      console.log('[Discogs] Neither Vision nor GPT-4o identified the vinyl');
 
       const fallbackQuestions = buildVinylFallbackQuestions(item);
 
@@ -562,13 +567,15 @@ async function enrichVinylItem(item) {
         ...item,
         collector_category: 'vinyl',
         collector_data: null,
-        collector_warning: 'Could not identify vinyl from image (GPT-4o and Vision both failed)',
+        collector_warning: 'Could not identify vinyl from image. Please provide catalog number or barcode.',
         followup_questions: fallbackQuestions,
+        identification_source: 'none',
         _base64Image: undefined
       };
     }
 
-    console.log(`[Discogs] Enriching vinyl: Artist="${artist}", Album="${album}", Year=${releaseYear}${visionUsed ? ' (via Vision fallback)' : ''}`);
+    // --- Discogs search with identified artist/album ---
+    console.log(`[Discogs] Enriching vinyl: Artist="${artist}", Album="${album}", Year=${releaseYear} (source: ${source})`);
     
     const discogsData = await searchVinyl(artist, album, releaseYear);
 
@@ -579,7 +586,8 @@ async function enrichVinylItem(item) {
         collector_category: 'vinyl',
         collector_data: null,
         collector_warning: 'Vinyl not found on Discogs',
-        vision_fallback_used: visionUsed,
+        identification_source: source,
+        followup_questions: buildVinylFallbackQuestions(item),
         _base64Image: undefined
       };
     }
@@ -588,7 +596,7 @@ async function enrichVinylItem(item) {
       ...item,
       collector_category: 'vinyl',
       collector_data: discogsData,
-      vision_fallback_used: visionUsed,
+      identification_source: source,
       _base64Image: undefined
     };
 
