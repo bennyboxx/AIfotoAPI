@@ -108,6 +108,136 @@ function formatOpenLibraryDoc(doc) {
 }
 
 /**
+ * Normalize a title for comparison (lowercase, collapse whitespace, strip edition markers).
+ */
+function normalizeTitle(str) {
+  if (!str) return '';
+  return String(str)
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Score a candidate result against the requested title/author.
+ * Higher is better. Used to pick the best match when multiple volumes come back.
+ *
+ * Important: Google Books often returns box sets, omnibus editions, or series
+ * compilations as the top result. We want to prefer the canonical single volume
+ * whose title exactly matches what was requested.
+ *
+ * @param {string} candidateTitle - Title from the API result
+ * @param {Array<string>} candidateAuthors - Authors from the API result
+ * @param {string|number|null} ratingsCount - Number of ratings on the result
+ * @param {string} searchTitle - The title we're searching for
+ * @param {string|null} searchAuthor - The author we're searching for
+ * @returns {number} Score
+ */
+function scoreBookMatch(candidateTitle, candidateAuthors, ratingsCount, searchTitle, searchAuthor) {
+  let score = 0;
+  const candidate = normalizeTitle(candidateTitle);
+  const search = normalizeTitle(searchTitle);
+
+  if (!candidate) return -1000;
+
+  // Title matching
+  if (candidate === search) {
+    score += 100;
+  } else if (candidate.startsWith(`${search}:`) || candidate.startsWith(`${search} -`)) {
+    score += 60;
+  } else if (candidate.startsWith(search)) {
+    score += 30;
+  } else if (candidate.includes(search)) {
+    score += 10;
+  }
+
+  // Heavy penalty for box sets / collections / omnibus editions
+  if (/\b(box set|collection|complete series|complete collection|omnibus|bundle|paperback set|hardcover set|\d+-book|\d+ book set)\b/i.test(candidate)) {
+    score -= 200;
+  }
+
+  // Penalty for a trailing series-volume number ("A Court of Thorns and Roses 7")
+  // This is the common case where Google Books returns a series entry
+  const trailing = candidate.replace(search, '').trim();
+  if (search && /^\d+$/.test(trailing)) {
+    score -= 150;
+  }
+
+  // Penalty if title is much longer than search and doesn't have a subtitle separator
+  if (search && candidate.length > search.length * 2 && !candidate.includes(':') && !candidate.includes(' - ')) {
+    score -= 30;
+  }
+
+  // Small bonus for results with many ratings (usually the canonical edition)
+  const rc = typeof ratingsCount === 'number' ? ratingsCount : 0;
+  if (rc > 1000) score += 20;
+  else if (rc > 100) score += 10;
+  else if (rc > 10) score += 5;
+
+  // Author matching bonus
+  if (searchAuthor && Array.isArray(candidateAuthors)) {
+    const searchA = normalizeTitle(searchAuthor);
+    const anyMatch = candidateAuthors.some(a => normalizeTitle(a).includes(searchA) || searchA.includes(normalizeTitle(a)));
+    if (anyMatch) score += 15;
+  }
+
+  return score;
+}
+
+/**
+ * Pick the best Google Books volume from a list of results.
+ */
+function pickBestGoogleBooksVolume(volumes, searchTitle, searchAuthor) {
+  if (!Array.isArray(volumes) || volumes.length === 0) return null;
+  if (volumes.length === 1) return volumes[0];
+
+  let best = volumes[0];
+  let bestScore = -Infinity;
+  for (const v of volumes) {
+    const info = v.volumeInfo || {};
+    const score = scoreBookMatch(
+      info.title,
+      info.authors,
+      info.ratingsCount,
+      searchTitle,
+      searchAuthor
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = v;
+    }
+  }
+  console.log(`[Books] Picked best Google Books match with score ${bestScore}: "${best.volumeInfo?.title}"`);
+  return best;
+}
+
+/**
+ * Pick the best Open Library doc from a list of results.
+ */
+function pickBestOpenLibraryDoc(docs, searchTitle, searchAuthor) {
+  if (!Array.isArray(docs) || docs.length === 0) return null;
+  if (docs.length === 1) return docs[0];
+
+  let best = docs[0];
+  let bestScore = -Infinity;
+  for (const d of docs) {
+    const score = scoreBookMatch(
+      d.title,
+      d.author_name,
+      d.ratings_count,
+      searchTitle,
+      searchAuthor
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = d;
+    }
+  }
+  console.log(`[Books] Picked best Open Library match with score ${bestScore}: "${best.title}"`);
+  return best;
+}
+
+/**
  * Merge two collector_data objects, preferring non-null/non-empty values from primary.
  */
 function mergeBookData(primary, secondary) {
@@ -180,7 +310,10 @@ async function searchBookByQuery(title, author = null) {
     if (author) parts.push(`inauthor:${author}`);
     const q = parts.join('+');
 
-    const url = `${GOOGLE_BOOKS_BASE}?q=${encodeURIComponent(q)}&maxResults=1`;
+    // Fetch several results so we can score and pick the best match.
+    // Google Books sometimes ranks box sets or series-entries above the canonical
+    // single volume, so we can't just blindly take the top result.
+    const url = `${GOOGLE_BOOKS_BASE}?q=${encodeURIComponent(q)}&maxResults=10&orderBy=relevance`;
     console.log(`[Books] Google Books query search: "${q}"`);
 
     const response = await fetch(url, {
@@ -200,7 +333,9 @@ async function searchBookByQuery(title, author = null) {
       return null;
     }
 
-    return formatGoogleBooksVolume(data.items[0]);
+    console.log(`[Books] Google Books returned ${data.items.length} candidates`);
+    const best = pickBestGoogleBooksVolume(data.items, title, author);
+    return formatGoogleBooksVolume(best);
   } catch (error) {
     console.error('[Books] Google Books query search error:', error.message);
     return null;
@@ -219,11 +354,14 @@ async function searchBookOpenLibrary(title, author = null, isbn = null) {
     const params = new URLSearchParams();
     if (isbn) {
       params.set('isbn', String(isbn).replace(/[^0-9Xx]/g, ''));
+      params.set('limit', '1');
     } else {
       if (title) params.set('title', title);
       if (author) params.set('author', author);
+      // Fetch more than one so we can pick the best — Open Library can also return
+      // box sets or unrelated entries at the top.
+      params.set('limit', '10');
     }
-    params.set('limit', '1');
 
     const url = `${OPEN_LIBRARY_BASE}?${params.toString()}`;
     console.log(`[Books] Open Library search: ${url}`);
@@ -245,7 +383,9 @@ async function searchBookOpenLibrary(title, author = null, isbn = null) {
       return null;
     }
 
-    return formatOpenLibraryDoc(data.docs[0]);
+    console.log(`[Books] Open Library returned ${data.docs.length} candidates`);
+    const best = isbn ? data.docs[0] : pickBestOpenLibraryDoc(data.docs, title, author);
+    return formatOpenLibraryDoc(best);
   } catch (error) {
     console.error('[Books] Open Library search error:', error.message);
     return null;
