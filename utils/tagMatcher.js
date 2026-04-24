@@ -7,7 +7,10 @@
 
 const SYSTEM_TAGS = {
   wine: ['wine', 'wijn', 'vin', 'vino', 'wein'],
-  vinyl: ['vinyl', 'plaat', 'lp', 'record', 'album', 'schijf']
+  vinyl: ['vinyl', 'plaat', 'lp', 'record', 'album', 'schijf'],
+  book: ['book', 'boek', 'livre', 'libro', 'buch', 'novel', 'roman'],
+  pokemon: ['pokemon', 'pokémon', 'pokemonkaart', 'pokemon card', 'tcg', 'trading card'],
+  art: ['art', 'kunst', 'kunstwerk', 'schilderij', 'painting', 'print', 'artwork', 'poster']
 };
 
 /**
@@ -34,11 +37,14 @@ function hasEnrichableTag(tags, category) {
 /**
  * Determine which enrichment type is needed based on tags
  * @param {Array<string>} tags - Array of tags
- * @returns {string|null} Enrichment type ('wine', 'vinyl') or null
+ * @returns {string|null} Enrichment type ('wine', 'vinyl', 'book', 'pokemon', 'art') or null
  */
 function getEnrichmentType(tags) {
   if (hasEnrichableTag(tags, 'wine')) return 'wine';
   if (hasEnrichableTag(tags, 'vinyl')) return 'vinyl';
+  if (hasEnrichableTag(tags, 'book')) return 'book';
+  if (hasEnrichableTag(tags, 'pokemon')) return 'pokemon';
+  if (hasEnrichableTag(tags, 'art')) return 'art';
   return null;
 }
 

@@ -230,8 +230,118 @@ async function identifyVinylFromImage(base64Image) {
   return extractVinylInfoFromWebDetection(webDetection);
 }
 
+// Generic art-related terms that are NOT actual artwork titles or artist names
+const GENERIC_ART_TERMS = new Set([
+  'art', 'artwork', 'fine art', 'visual art', 'modern art', 'contemporary art',
+  'painting', 'oil painting', 'acrylic painting', 'watercolor', 'watercolour',
+  'print', 'art print', 'poster', 'canvas', 'illustration', 'drawing', 'sketch',
+  'picture', 'image', 'photo', 'photograph', 'photography',
+  'frame', 'picture frame', 'wall art', 'wall decor',
+  'museum', 'gallery', 'exhibition',
+  'landscape', 'portrait', 'still life'
+]);
+
+function isGenericArtTerm(term) {
+  if (!term) return true;
+  return GENERIC_ART_TERMS.has(term.toLowerCase().trim());
+}
+
+/**
+ * Try to extract artwork title and artist from Vision web detection.
+ * @param {Object} webDetection
+ * @returns {Object|null} { title, artist, confidence, source, wikipedia_url } or null
+ */
+function extractArtworkInfoFromWebDetection(webDetection) {
+  if (!webDetection) return null;
+
+  const bestGuess = webDetection.bestGuessLabels?.[0]?.label || '';
+
+  // Dedupe entities, drop generic art terms
+  const entityMap = new Map();
+  (webDetection.webEntities || []).forEach(e => {
+    if (!e.description || e.score <= 0.3 || isGenericArtTerm(e.description)) return;
+    const key = e.description.toLowerCase();
+    if (!entityMap.has(key) || (entityMap.get(key).score || 0) < (e.score || 0)) {
+      entityMap.set(key, e);
+    }
+  });
+  const entities = Array.from(entityMap.values())
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  console.log(`[Vision] Parsing artwork info from best guess: "${bestGuess}"`);
+  console.log(`[Vision] Filtered art entities: ${entities.slice(0, 5).map(e => e.description).join(', ')}`);
+
+  // Strong signal: Wikipedia page about the artwork in matching pages
+  const wikipediaPage = (webDetection.pagesWithMatchingImages || [])
+    .find(p => p.url && /wikipedia\.org\/wiki\//.test(p.url));
+  const wikipediaUrl = wikipediaPage?.url || null;
+
+  let title = null;
+  let artist = null;
+
+  // Strategy 1: "Title by Artist" pattern in best guess
+  const cleanedGuess = bestGuess
+    .replace(/\b(painting|oil painting|art print|artwork|print|poster|canvas)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const byMatch = cleanedGuess.match(/^(.+?)\s+by\s+(.+)$/i);
+  if (byMatch) {
+    title = byMatch[1].trim();
+    artist = byMatch[2].trim();
+  }
+
+  // Strategy 2: "Artist - Title" pattern
+  if (!title) {
+    const dashMatch = cleanedGuess.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+    if (dashMatch) {
+      artist = dashMatch[1].trim();
+      title = dashMatch[2].trim();
+    }
+  }
+
+  // Strategy 3: Top 2 entities — heuristic: artist is often a known person name (2 words),
+  // title is more distinctive. We try to detect "person-like" entity ordering.
+  if (!title && entities.length >= 2) {
+    // Usually the first entity is the most specific match (the artwork), second is the artist
+    title = entities[0].description;
+    artist = entities[1].description;
+  } else if (!title && entities.length === 1) {
+    title = entities[0].description;
+  }
+
+  if (!title && !artist && !wikipediaUrl) {
+    console.log('[Vision] Could not extract artwork info from web detection');
+    return null;
+  }
+
+  const result = {
+    title: title || null,
+    artist: artist || null,
+    source: 'google_vision_web_detection',
+    wikipedia_url: wikipediaUrl,
+    confidence: entities[0]?.score || 0.5
+  };
+
+  console.log(`[Vision] Extracted artwork info: "${result.title}" by "${result.artist}"${wikipediaUrl ? ' [Wikipedia match]' : ''}`);
+
+  return result;
+}
+
+/**
+ * Full pipeline: run web detection and extract artwork info.
+ * @param {string} base64Image - Base64 encoded image
+ * @returns {Promise<Object|null>}
+ */
+async function identifyArtworkFromImage(base64Image) {
+  const webDetection = await detectWebEntities(base64Image);
+  return extractArtworkInfoFromWebDetection(webDetection);
+}
+
 module.exports = {
   detectWebEntities,
   extractVinylInfoFromWebDetection,
-  identifyVinylFromImage
+  identifyVinylFromImage,
+  extractArtworkInfoFromWebDetection,
+  identifyArtworkFromImage
 };

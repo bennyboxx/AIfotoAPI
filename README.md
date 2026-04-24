@@ -6,9 +6,12 @@ Backend API voor de Flutter-app "Track My Home" die afbeeldingen verwerkt met Op
 
 - **Firebase Authentication**: Verificatie van gebruikers via Firebase ID-tokens
 - **OpenAI Vision Integration**: Analyse van afbeeldingen met GPT-4o Vision
-- **Collector Items Support**: Automatische herkenning en verrijking van verzamelitems (wijnen, vinyl)
-  - **Wine Integration**: Vivino API integratie voor wijnbeoordelingen en details
-  - **Vinyl Integration**: Discogs API integratie voor vinyl/platen informatie
+- **Collector Items Support**: Automatische herkenning en verrijking van verzamelitems
+  - **Wine Integration**: Vivino search URL + GPT-4o wine details
+  - **Vinyl Integration**: Discogs API + Google Vision reverse image search
+  - **Book Integration**: Google Books API + Open Library (ISBN fallback)
+  - **Pokémon TCG Integration**: pokemontcg.io (met TCGPlayer + CardMarket marktprijzen)
+  - **Artwork Integration**: Google Vision + Metropolitan Museum + Art Institute of Chicago + Wikipedia
 - **Multi-language Support**: Ondersteuning voor meerdere talen (NL, EN, FR, DE, ES, IT, PT)
 - **Image Processing**: Download en verwerking van afbeeldingen van Firebase Storage
 - **Rate Limiting**: Bescherming tegen overmatige API-aanroepen
@@ -149,6 +152,9 @@ Content-Type: application/json
     "collector_items": 1,
     "wine_items": 1,
     "vinyl_items": 0,
+    "book_items": 0,
+    "pokemon_items": 0,
+    "art_items": 0,
     "general_items": 1,
     "enrichment_failures": 0
   }
@@ -207,8 +213,11 @@ POST /process
 
 | Tag | Aliases | Enrichment API | Data |
 |-----|---------|----------------|------|
-| **wine** | wijn, vin, vino, wein | Vivino | Rating, reviews, region, pairing |
-| **vinyl** | plaat, LP, record, album | Discogs | Artist, year, label, pricing |
+| **wine** | wijn, vin, vino, wein | Vivino + GPT-4o | Rating, grape variety, region, food pairing |
+| **vinyl** | plaat, LP, record, album, schijf | Discogs + Google Vision | Artist, album, year, label, genres, pricing |
+| **book** | boek, livre, libro, buch, novel, roman | Google Books + Open Library | Title, authors, publisher, ISBN, cover, rating |
+| **pokemon** | pokémon, pokemonkaart, pokemon card, tcg, trading card | pokemontcg.io | Card name, set, rarity, HP, TCGPlayer & CardMarket prices |
+| **art** | kunst, kunstwerk, schilderij, painting, print, artwork, poster | Google Vision + Met + AIC + Wikipedia | Title, artist, date, medium, museum, description |
 
 **Custom tags** (zoals LEGO, speelgoed, vintage) worden assigned door de AI maar hebben (nog) geen API enrichment.
 
@@ -240,6 +249,41 @@ De API integreert met Discogs voor vinyl informatie:
 - **Format details** (LP, 12", etc.)
 - **Directe link** naar Discogs pagina
 
+#### 📚 Boeken (Book)
+De API gebruikt Google Books (primair) + Open Library (fallback):
+- **Titel** en auteur(s)
+- **Uitgever** en publicatiedatum
+- **Pagina-aantal** en taal
+- **ISBN-10** en **ISBN-13**
+- **Cover afbeelding**
+- **Beschrijving** (Google Books)
+- **Rating** en aantal reviews (indien beschikbaar)
+- **Google Books URL** en **Open Library URL**
+- **Preview link** (indien beschikbaar)
+- **Fallback**: ISBN-barcode vraag als het boek niet gevonden wordt
+
+#### 🃏 Pokémon TCG Kaarten (Pokemon)
+De API integreert met pokemontcg.io voor individuele trading cards:
+- **Kaartnaam** (bv. Charizard) en set (bv. Base Set)
+- **Kaartnummer** (bv. 4/102) en zeldzaamheid
+- **HP** en type(s) (Fire, Water, etc.)
+- **Artist** en release datum
+- **TCGPlayer marktprijs** (USD) — low/mid/market/high
+- **CardMarket marktprijs** (EUR) — gemiddelde en trend
+- **Hi-res kaart afbeelding**
+- **Directe link** naar TCGPlayer en CardMarket
+- **Fallback**: kaartnummer / setnaam vraag als de kaart niet herkend wordt
+
+#### 🎨 Kunstwerken (Art)
+De API gebruikt Google Vision reverse image search + meerdere gratis museum API's:
+- **Primaire identificatie**: Google Vision WEB_DETECTION (zelfde aanpak als vinyl)
+- **Metropolitan Museum of Art** collection API
+- **Art Institute of Chicago** collection API
+- **Wikipedia** REST als laatste fallback
+- Data: **titel**, **kunstenaar**, **nationaliteit**, **levensjaren**, **jaar gemaakt**, **medium**, **afmetingen**, **museum**, **afbeelding**, **beschrijving**
+- **Directe link** naar het museum en/of Wikipedia artikel
+- **Fallback**: kunstenaar + titel vraag voor onbekende/lokale werken
+
 ### Hoe het Werkt
 
 1. **Automatische Detectie**: OpenAI Vision herkent of een item een wijn, vinyl of algemeen item is
@@ -259,9 +303,15 @@ Elk collector item in de response bevat:
 ### Environment Configuratie voor Collector Features
 
 ```env
-# Optioneel - voor Discogs integratie
+# Vereist voor Vinyl (Discogs) integratie
 DISCOGS_API_KEY=QTZqBaNFlgFGLuaYUAli
 DISCOGS_API_SECRET=CDmhKLeYBmoVDnDdXqEpSmuWnkpcQHEX
+
+# Vereist voor Vinyl + Kunstwerk identificatie (Google Vision reverse image search)
+GOOGLE_CLOUD_API_KEY=your_google_cloud_api_key
+
+# Optioneel - hogere rate limits voor Pokémon TCG
+POKEMONTCG_API_KEY=your_pokemontcg_api_key
 ```
 
 **Discogs API Setup:**
@@ -271,10 +321,22 @@ DISCOGS_API_SECRET=CDmhKLeYBmoVDnDdXqEpSmuWnkpcQHEX
 4. Kopieer de **Consumer Key** naar `DISCOGS_API_KEY`
 5. Kopieer de **Consumer Secret** naar `DISCOGS_API_SECRET`
 
+**Google Cloud Vision Setup** (voor vinyl + kunst reverse image search):
+1. Ga naar [Google Cloud Console](https://console.cloud.google.com/)
+2. Activeer de **Cloud Vision API** voor je project
+3. Maak een API key aan en vul die in als `GOOGLE_CLOUD_API_KEY`
+
+**Pokémon TCG Setup** (optioneel):
+1. Ga naar https://dev.pokemontcg.io/
+2. Registreer gratis om een API key te krijgen voor hogere rate limits
+3. Vul in als `POKEMONTCG_API_KEY`
+
 **Note**: 
-- Vivino integratie werkt zonder API key (gebruikt publieke endpoints)
-- Discogs vereist OAuth credentials (Consumer Key/Secret) voor database toegang
-- Als credentials niet zijn geconfigureerd, blijven items beschikbaar zonder enrichment
+- **Geen API key nodig** voor: Vivino, Google Books, Open Library, Metropolitan Museum, Art Institute of Chicago, Wikipedia en pokemontcg.io (basic)
+- Vivino integratie werkt volledig zonder API key
+- Discogs vereist OAuth credentials (Consumer Key/Secret)
+- Google Vision is nodig voor vinyl- én kunstwerk-identificatie (reverse image search)
+- Als credentials niet zijn geconfigureerd, blijven items beschikbaar zonder enrichment (met `collector_warning`)
 
 ### POST /process-single
 Verwerkt een afbeelding en analyseert **één specifiek item** in detail.
@@ -496,12 +558,12 @@ final response = await http.post(
 
 De volgende categorieën zijn gepland voor toekomstige releases:
 
-- **📚 Boeken** - Eerste edities, zeldzame boeken, signed copies
-- **🧸 Speelgoed** - Vintage speelgoed, actiefiguren, LEGO sets
+- **🧸 Speelgoed / LEGO** - LEGO sets via Rebrickable, vintage speelgoed, actiefiguren
 - **⌚ Horloges** - Luxe horloges, vintage timepieces
 - **👟 Sneakers** - Limited editions, collaborations
 - **📖 Comics** - Vintage comics, graphic novels, first editions
-- **🎨 Kunst** - Prints, schilderijen, limited editions
+- **🎮 Videogames** - Retro games en consoles via RAWG of IGDB
+- **🎲 Bordspellen** - Via BoardGameGeek API
 
 Wil je een specifieke categorie toegevoegd zien? Laat het ons weten!
 
@@ -522,9 +584,13 @@ Wil je een specifieke categorie toegevoegd zien? Laat het ons weten!
    - Zorg dat de afbeelding niet te groot is
 
 4. **Collector enrichment failed**
-   - Controleer of DISCOGS_API_KEY en DISCOGS_API_SECRET correct zijn ingesteld
+   - Controleer of `DISCOGS_API_KEY` en `DISCOGS_API_SECRET` correct zijn ingesteld (vinyl)
+   - Controleer of `GOOGLE_CLOUD_API_KEY` is ingesteld én de Cloud Vision API is geactiveerd (vinyl + kunst)
+   - Voor **boeken**: als Google Books niks vindt, wordt Open Library geprobeerd. Fallback vraagt om ISBN.
+   - Voor **Pokémon**: bij rate-limit (429) zet `POKEMONTCG_API_KEY` voor hogere limieten. Fallback vraagt om kaartnummer/setnaam.
+   - Voor **kunst**: werkt alleen voor bekende werken die Google Vision herkent. Voor onbekende werken wordt de user gevraagd naar kunstenaar/titel.
    - Items blijven beschikbaar met basis informatie als enrichment faalt
-   - Check de `collector_warning` veld in de response voor details
+   - Check het `collector_warning` veld in de response voor details
 
 ## 📝 Logging
 

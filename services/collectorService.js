@@ -1,5 +1,8 @@
 const { enrichWineItem } = require('./vivinoService');
 const { enrichVinylItem } = require('./discogsService');
+const { enrichBookItem } = require('./booksService');
+const { enrichPokemonItem } = require('./pokemonService');
+const { enrichArtworkItem } = require('./artService');
 
 /**
  * Central Collector Service
@@ -32,7 +35,22 @@ async function processCollectorItem(item) {
       console.log(`[Collector] Detected vinyl via tags, enriching with Discogs`);
       return await enrichVinylItem(item);
     }
-    
+
+    if (enrichmentType === 'book') {
+      console.log(`[Collector] Detected book via tags, enriching with Google Books + Open Library`);
+      return await enrichBookItem(item);
+    }
+
+    if (enrichmentType === 'pokemon') {
+      console.log(`[Collector] Detected Pokémon card via tags, enriching with pokemontcg.io`);
+      return await enrichPokemonItem(item);
+    }
+
+    if (enrichmentType === 'art') {
+      console.log(`[Collector] Detected artwork via tags, enriching with Vision + museum APIs`);
+      return await enrichArtworkItem(item);
+    }
+
     // Fallback: check old item_type for backwards compatibility
     if (item.item_type === 'wine') {
       console.log(`[Collector] Detected wine via item_type (legacy), enriching with wine data`);
@@ -42,6 +60,21 @@ async function processCollectorItem(item) {
     if (item.item_type === 'vinyl') {
       console.log(`[Collector] Detected vinyl via item_type (legacy), enriching with Discogs`);
       return await enrichVinylItem(item);
+    }
+
+    if (item.item_type === 'book') {
+      console.log(`[Collector] Detected book via item_type (legacy), enriching with Google Books`);
+      return await enrichBookItem(item);
+    }
+
+    if (item.item_type === 'pokemon') {
+      console.log(`[Collector] Detected Pokémon via item_type (legacy), enriching with pokemontcg.io`);
+      return await enrichPokemonItem(item);
+    }
+
+    if (item.item_type === 'art') {
+      console.log(`[Collector] Detected artwork via item_type (legacy), enriching with Vision + museum APIs`);
+      return await enrichArtworkItem(item);
     }
     
     // Item has custom tags but no enrichment available
@@ -107,6 +140,9 @@ function getCollectorStats(items) {
       collector_items: 0,
       wine_items: 0,
       vinyl_items: 0,
+      book_items: 0,
+      pokemon_items: 0,
+      art_items: 0,
       general_items: 0
     };
   }
@@ -116,6 +152,9 @@ function getCollectorStats(items) {
     collector_items: 0,
     wine_items: 0,
     vinyl_items: 0,
+    book_items: 0,
+    pokemon_items: 0,
+    art_items: 0,
     general_items: 0,
     enrichment_failures: 0
   };
@@ -127,6 +166,15 @@ function getCollectorStats(items) {
     } else if (item.collector_category === 'vinyl') {
       stats.collector_items++;
       stats.vinyl_items++;
+    } else if (item.collector_category === 'book') {
+      stats.collector_items++;
+      stats.book_items++;
+    } else if (item.collector_category === 'pokemon') {
+      stats.collector_items++;
+      stats.pokemon_items++;
+    } else if (item.collector_category === 'art') {
+      stats.collector_items++;
+      stats.art_items++;
     } else {
       stats.general_items++;
     }
